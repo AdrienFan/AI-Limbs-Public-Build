@@ -12,6 +12,16 @@ import java.io.OutputStream
 internal object ArtImageEncoder {
     @Suppress("DEPRECATION")
     fun write(bitmap: Bitmap, format: String, file: File) {
+        if(format=="exr") {
+            val bytes=ArtOpenExr.encode(bitmap.width,bitmap.height,ArtFloatPixels.read(bitmap),256*1024*1024)
+            FileOutputStream(file).use {it.write(bytes);it.fd.sync()};return
+        }
+        if(bitmap.config==Bitmap.Config.RGBA_F16) {
+            // A requested SDR format explicitly maps linear HDR to 8-bit sRGB; project data stays F16.
+            val sdr=Bitmap.createBitmap(bitmap.width,bitmap.height,Bitmap.Config.ARGB_8888)
+            try {android.graphics.Canvas(sdr).drawBitmap(bitmap,0f,0f,null);write(sdr,format,file)} finally {sdr.recycle()}
+            return
+        }
         when (format) {
             "heic", "heif" -> HeifWriter.Builder(file.absolutePath, bitmap.width, bitmap.height, HeifWriter.INPUT_MODE_BITMAP)
                 .setMaxImages(1).setQuality(95).build().use { writer ->

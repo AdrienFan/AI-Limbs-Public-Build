@@ -180,39 +180,32 @@ internal object ArtMenuOperations {
         require(mode in setOf("luminosity", "luminosity601", "average", "lightness", "min", "max"))
         val coverage=selection?.takeIf {it.has("coverage")}?.let {ArtSoftSelection.Sampler(it)}
         val region = selection?.takeIf {!it.has("coverage")}?.let { Region().apply { setPath(ArtSelection.path(it), Region(0, 0, bitmap.width, bitmap.height)) } }
-        val row = IntArray(bitmap.width)
-        for (y in 0 until bitmap.height) {
-            bitmap.getPixels(row, 0, row.size, 0, y, row.size, 1)
-            for (x in row.indices) {
-                if (region != null && !region.contains(x, y)) continue
-                val amount=coverage?.at(x+0.5,y+0.5) ?: 255;if(amount==0)continue
-                val c = row[x]; val a = Color.alpha(c)
-                if (a == 0) { if (action == "filter.resettransparent") row[x] = 0; continue }
-                val r = Color.red(c); val g = Color.green(c); val b = Color.blue(c)
-                fun quant(v: Int): Int {
-                    val step=65535/steps;val value=v*257;val remainder=value%step
-                    val quantized=value + if(remainder>step/2) step-remainder else -remainder
-                    return (quantized.coerceIn(0,65535)/257.0).roundToInt()
-                }
-                row[x] = when (action) {
-                    "filter.invert" -> Color.argb(a, 255-r, 255-g, 255-b)
-                    "filter.desaturate" -> {
-                        val v = when (mode) { "average" -> (r+g+b)/3; "lightness" -> (maxOf(r,g,b)+minOf(r,g,b))/2
-                            "min" -> minOf(r,g,b); "max" -> maxOf(r,g,b); "luminosity601" -> (r*0.299+g*0.587+b*0.114).roundToInt(); else -> luma(c) }
-                        Color.argb(a,v,v,v)
-                    }
-                    "filter.threshold" -> { val v = if (luma(c) > threshold) 255 else 0; Color.argb(a,v,v,v) }
-                    "filter.posterize" -> Color.argb(quant(a),quant(r),quant(g),quant(b))
-                    "filter.maximize" -> { val v=maxOf(r,g,b); Color.argb(a,if(r==v)r else 0,if(g==v)g else 0,if(b==v)b else 0) }
-                    "filter.minimize" -> { val v=minOf(r,g,b); Color.argb(a,if(r==v)r else 0,if(g==v)g else 0,if(b==v)b else 0) }
-                    "filter.resettransparent" -> c
-                    else -> error("尚未实现的滤镜")
-                }
-                row[x]=ArtSoftSelection.blend(c,row[x],amount)
+        val pixels=ArtFloatPixels.read(bitmap)
+        for(y in 0 until bitmap.height)for(x in 0 until bitmap.width) {
+            if(region!=null && !region.contains(x,y))continue
+            val amount=(coverage?.at(x+.5,y+.5) ?: 255)/255f;if(amount==0f)continue
+            val i=(y*bitmap.width+x)*4;val a=pixels[i+3]
+            if(a==0f) {if(action=="filter.resettransparent")for(c in 0..2)pixels[i+c]*=1-amount;continue}
+            val red=pixels[i]/a;val green=pixels[i+1]/a;val blue=pixels[i+2]/a
+            val result=floatArrayOf(red,green,blue,a)
+            fun luma()=red*.2126f+green*.7152f+blue*.0722f
+            when(action) {
+                "filter.invert"->for(c in 0..2)result[c]=1-result[c]
+                "filter.desaturate"->{val v=when(mode) {"average"->(red+green+blue)/3;"lightness"->(maxOf(red,green,blue)+minOf(red,green,blue))/2
+                    "min"->minOf(red,green,blue);"max"->maxOf(red,green,blue);"luminosity601"->red*.299f+green*.587f+blue*.114f;else->luma()}
+                    for(c in 0..2)result[c]=v}
+                "filter.threshold"->{val v=if(luma()>ArtFloatPixels.linear(threshold/255f))1f else 0f;for(c in 0..2)result[c]=v}
+                "filter.posterize"->{for(c in 0..3)result[c]=kotlin.math.round(result[c]*steps)/steps;result[3]=result[3].coerceIn(0f,1f)}
+                "filter.maximize","filter.minimize"->{val v=if(action=="filter.maximize")maxOf(red,green,blue) else minOf(red,green,blue)
+                    for(c in 0..2)if(result[c]!=v)result[c]=0f}
+                "filter.resettransparent"->Unit
+                else->error("尚未实现的滤镜")
             }
-            bitmap.setPixels(row, 0, row.size, 0, y, row.size, 1)
+            for(c in 0..3)pixels[i+c]=pixels[i+c]*(1-amount)+(if(c==3)result[3] else result[c]*result[3])*amount
         }
+        ArtFloatPixels.write(bitmap,pixels)
     }
+
     fun luma(c: Int): Int = (Color.red(c)*0.2126 + Color.green(c)*0.7152 + Color.blue(c)*0.0722).roundToInt()
     fun histogram(bitmap: Bitmap): JSONObject {
         val channels = Array(4) { IntArray(256) }

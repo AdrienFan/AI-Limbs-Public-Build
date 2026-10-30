@@ -20,13 +20,12 @@ internal class StudioColorizeInteraction {
         return a.indices.all {abs(a[it]-b[it])<0.001f}
     }
     fun touch(event: MotionEvent,state: JSONObject,doc: String,revision: Int,layerId: String,
-        matrix: Matrix,busy: Boolean,color: String,width: Float,erase: Boolean,
+        matrix: Matrix,busy: Boolean,color: String,width: Float,erase: Boolean,linearRGBA:JSONArray?,
         onCreate: (JSONObject)->Unit,onStroke: (JSONObject)->Unit): Boolean {
         if(busy || event.actionMasked==MotionEvent.ACTION_CANCEL) {cancel();return true}
         if(event.actionMasked==MotionEvent.ACTION_DOWN) {
             cancel()
             val layer=ArtMenuOperations.layers(state).first {it.getString("id")==layerId}
-            ArtColorize.root(layer)
             val create=layer.getString("kind")!="colorize"
             if(create)ArtColorize.source(state,layerId)
             else require(layer.getBoolean("visible") && !layer.getBoolean("locked") &&
@@ -37,6 +36,7 @@ internal class StudioColorizeInteraction {
             context=JSONObject().put("documentId",doc).put("expectedRevision",revision)
                 .put("layerId",layerId).put("create",create)
             style=JSONObject().put("color",color).put("width",width.toDouble()).put("erase",erase)
+            if(linearRGBA!=null && !erase) {ArtFloatPixels.color(linearRGBA);style!!.put("linearRGBA",JSONArray(linearRGBA.toString()))}
             state.optJSONObject("selection")?.let {style!!.put("selection",JSONObject(it.toString()))}
         }
         val capture=context ?: return true

@@ -12,6 +12,7 @@ internal object ArtExportFormats {
     data class Format(val id: String, val label: String, val mime: String, val opaque: Boolean, val notice: String)
     data class Support(val format: Format, val available: Boolean, val reason: String)
     val formats = listOf(
+        Format("exr", "OpenEXR（HDR）", "image/x-exr", false, "线性16位浮点、ZIP无损、保留透明度、负值及大于1的HDR亮度。"),
         Format("png", "PNG", "image/png", false, "无损，保留透明度。"),
         Format("jpeg", "JPEG", "image/jpeg", true, "有损，透明区域合成为白色。"),
         Format("webp", "WebP", "image/webp", false, "无损，保留透明度；输出单张图片。"),

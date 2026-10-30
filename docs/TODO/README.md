@@ -48,7 +48,7 @@ For_Agent: 对项目大规模动工前按本规范协作
 
 ## 当前计划
 
-- [画室0.2.99工具缺漏第一批](art-studio-v0299-tool-gaps/index.md)：外围颜色围合、磁性套索闭合调整、复杂路径分格；本批仅源码，用户要求其他缺漏补齐后再统一云编译和测试，当前不推送。
+- [画室0.2.99工具补齐与HDR](art-studio-v0299-tool-gaps/index.md)：六类工具剩余机制、RGBA_F16／OpenEXR全链路；用户已要求HDR一起完成后统一云编译，包含独立EXR与Android像素验证。
 
 - [画室能力回执与提交确认](art-studio-capability-receipts/README.md)：只修复大工程返回与提交确认问题；其他动画问题另轮处理。
 

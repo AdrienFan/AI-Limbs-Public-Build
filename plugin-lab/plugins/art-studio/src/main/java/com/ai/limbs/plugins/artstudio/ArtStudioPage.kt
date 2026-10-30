@@ -468,6 +468,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     var referenceBitmaps by remember { mutableStateOf(displayedFrame?.frame?.fourth ?: emptyMap()) }
     var referenceMultiple by remember { mutableStateOf(false) }
     var colorizeWidth by remember { mutableFloatStateOf(16f) }
+    var colorizeLinearRGBA by remember {mutableStateOf<JSONArray?>(null)}
     var colorizeErase by remember { mutableStateOf(false) }
     var selectionBezierEditing by remember {mutableStateOf(false)}
     var selectionBezierComponent by remember {mutableIntStateOf(0)}
@@ -1363,7 +1364,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         }
     }
     LaunchedEffect(tool,current?.optString("id"),revision,selected,
-        magneticSettings.getString("reference"),magneticSettings.getInt("filterRadius"),magneticSettings.getBoolean("limitToSelection")) {
+        ArtMagneticSelection.referenceKey(magneticSettings),magneticSettings.getInt("filterRadius"),magneticSettings.getBoolean("limitToSelection")) {
         magneticImage=null
         if(tool=="select_magnetic" && current!=null && selected.isNotBlank()) {
             val request=JSONObject(magneticSettings.toString()).put("documentId",current.getString("id"))
@@ -2127,7 +2128,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                     view.onSvgPick={x,y->if(!busy)perform {store.svgPick("AWEI",JSONObject().put("documentId",current.getString("id")).put("expectedRevision",current.getInt("revision")).put("x",x).put("y",y))}}
                     view.shapeMultiple = shapeMultiple; view.shapeShear = shapeShear; view.shapeBusy = busy
                     view.onShapeEdit = ::edit
-                    view.colorizeWidth=colorizeWidth;view.colorizeErase=colorizeErase
+                    view.colorizeWidth=colorizeWidth;view.colorizeErase=colorizeErase;view.colorizeLinearRGBA=colorizeLinearRGBA
                     view.onColorizeCreate={p -> if(!busy)perform {store.colorizeCreate("AWEI",p)}}
                     view.onColorizeStroke={p -> if(!busy)perform {store.colorizeStroke("AWEI",p)}}
                     view.selectionBezierEditing=selectionBezierEditing
@@ -3028,6 +3029,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 }
                 if(tool=="colorize_mask") {
                     StudioColorizeOptions(current,selected,busy,colorizeWidth,colorizeErase,color,
+                        colorizeLinearRGBA,{colorizeLinearRGBA=it},
                         {colorizeWidth=it},{colorizeErase=it},{color=it},
                         {p -> if(!busy)perform {store.colorizeCreate("AWEI",p)}},
                         {p -> if(!busy)perform {store.colorizeUpdate("AWEI",p)}},
@@ -3048,7 +3050,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                             }
                         },{selectionBezierComponent=it},{selectionBezierNode=it},{selectionBezierMode=it},{selectionBezierSmooth=it},
                         {command -> canvasRef[0]?.selectionBezierCommand(command)},
-                        {p -> if(!busy)perform {store.bezierSelectionEdit("AWEI",p)}})
+                        {p -> if(!busy)perform {store.bezierSelectionEdit("AWEI",p)}},
+                        {p->if(!busy)perform {store.rotateSelection("AWEI",p)}},{p->if(!busy)perform {store.selectionMask("AWEI",p)}})
                 }
                 if(tool=="move")StudioMoveOptions(moveSettings,busy || moveSettingsBusy,moveSettingsReady,
                     {p->changeMoveSettings(p)},
@@ -3071,9 +3074,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 if(tool=="select_contiguous")StudioColorSelectionOptions(contiguousSettings,true,busy,{contiguousSettings=it})
                 if(tool=="select_similar")StudioColorSelectionOptions(similarSettings,false,busy,{similarSettings=it})
                 if(tool=="select_magnetic")StudioMagneticSelectionOptions(magneticSettings,busy,magneticDraft,magneticImage!=null,
+                    current.getJSONObject("state").optJSONObject("selection")?.optJSONObject("magneticSource"),
                     {magneticSettings=it},{command -> canvasRef[0]?.magneticCommand(command)})
                 if(tool=="comic_panel") {
-                    StudioComicPanelOptions(current,selected,busy,comicPanelSettings,{comicPanelSettings=it},
+                    StudioComicPanelOptions(store,current,selected,busy,comicPanelSettings,{comicPanelSettings=it},
                         {p -> if(!busy)perform {store.apply("AWEI","VECTOR_LAYER_CREATE",p.put("id",java.util.UUID.randomUUID().toString()))}},
                         {p -> if(!busy)perform {store.comicFrame("AWEI",p)}},
                         {p -> if(!busy)perform {store.apply("AWEI","SHAPE_STYLE",p)}})
@@ -3964,6 +3968,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var onEncloseFill: (JSONObject)->Unit = {}
     private val colorizeInteraction=StudioColorizeInteraction()
     var colorizeWidth=16f
+    var colorizeLinearRGBA:JSONArray?=null
     var colorizeErase=false
     var onColorizeCreate: (JSONObject)->Unit = {}
     var onColorizeStroke: (JSONObject)->Unit = {}
@@ -4008,8 +4013,7 @@ private class StudioCanvas(context: Context) : View(context) {
     private val brushReader:(String)->Bitmap = {id ->
         brushBitmapCache[id] ?: run {
             val file=requireNotNull(brushAssetFile)(id)
-            val bounds=android.graphics.BitmapFactory.Options().apply {inJustDecodeBounds=true}
-            android.graphics.BitmapFactory.decodeFile(file.absolutePath,bounds)
+            val bounds=ArtImagePolicy.bounds(file)
             require(bounds.outWidth in 1..512 && bounds.outHeight in 1..512)
             if(brushBitmapCache.size>=8) {val key=brushBitmapCache.keys.first();brushBitmapCache.remove(key)!!.recycle()}
             ArtImagePolicy.decodeAsset(file).also {brushBitmapCache[id]=it}
@@ -4604,7 +4608,12 @@ private class StudioCanvas(context: Context) : View(context) {
 
     fun magneticCommand(action: String) {
         if(shapeBusy && action!="cancel")return
-        try {magneticSelectionInteraction.command(action)}
+        try {
+            if(action=="reopen")magneticSelectionInteraction.reopen(
+                requireNotNull(scene?.optJSONObject("selection")?.optJSONObject("magneticSource")) {"当前选区没有磁性锚点"},
+                documentId,sceneRevision,selectedId,matrix,onMagneticComplete)
+            else magneticSelectionInteraction.command(action)
+        }
         catch(error: Exception) {
             android.util.Log.e("ArtStudio","Magnetic selection command failed",error)
             Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()
@@ -4886,7 +4895,7 @@ private class StudioCanvas(context: Context) : View(context) {
             val state=scene ?: return true
             try {
                 return colorizeInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,
-                    color,colorizeWidth,colorizeErase,onColorizeCreate,onColorizeStroke)
+                    color,colorizeWidth,colorizeErase,colorizeLinearRGBA,onColorizeCreate,onColorizeStroke)
             } catch(error:Exception) {
                 colorizeInteraction.cancel();gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
                 android.util.Log.e("ArtStudio","Colorize key stroke failed",error)

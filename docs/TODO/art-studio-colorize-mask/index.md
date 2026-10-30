@@ -1,4 +1,6 @@
 ---
+
+> 本文保留当时版本记录；0.2.99新增HDR、变换／分组与工具补齐状态以[当前范围](../art-studio-v0299-tool-gaps/index.md)为准。
 fork: https://github.com/AdrienFan/AI-Limbs-Public-Build
 status: source-complete
 ---

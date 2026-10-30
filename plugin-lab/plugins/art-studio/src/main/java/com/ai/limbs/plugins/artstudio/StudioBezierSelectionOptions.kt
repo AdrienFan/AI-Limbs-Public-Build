@@ -4,7 +4,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import org.json.JSONArray
@@ -14,7 +14,7 @@ import org.json.JSONObject
 internal fun StudioBezierSelectionOptions(snapshot: JSONObject,busy: Boolean,editing: Boolean,
     component: Int,node: Int,mode: String,autoSmooth: Boolean,settings:JSONObject,draft:Boolean,onSettings:(JSONObject)->Unit,onEditing: (Boolean)->Unit,
     onComponent: (Int)->Unit,onNode: (Int)->Unit,onMode: (String)->Unit,onSmooth: (Boolean)->Unit,
-    onCommand: (String)->Unit,onEdit: (JSONObject)->Unit) {
+    onCommand: (String)->Unit,onEdit: (JSONObject)->Unit,onRotate:(JSONObject)->Unit,onMask:(JSONObject)->Unit) {
     val selection=snapshot.getJSONObject("state").optJSONObject("selection")
     val parts=selection?.let {ArtBezierSelection.parts(it)} ?: emptyList()
     val curves=parts.indices.filter {parts[it].getJSONObject("selection").optString("shape","rect")=="bezier"}
@@ -22,6 +22,30 @@ internal fun StudioBezierSelectionOptions(snapshot: JSONObject,busy: Boolean,edi
     fun edit(action: JSONObject) {
         onEdit(JSONObject().put("documentId",snapshot.getString("id")).put("expectedRevision",snapshot.getInt("revision"))
             .put("componentIndex",component).put("edits",JSONArray().put(action)))
+    }
+    Row(Modifier.horizontalScroll(rememberScrollState())) {
+        listOf(0,15,30,45,90).forEach {angle->FilterChip(selected=settings.optDouble("angleStep",0.0)==angle.toDouble(),
+            enabled=!busy&&!draft,onClick={onSettings(JSONObject(settings.toString()).put("angleStep",angle.toDouble()))},
+            label={Text(if(angle==0)"自由角度" else "吸附 "+angle+"°")})}
+    }
+    var degrees by remember {mutableStateOf("15")}
+    OutlinedTextField(degrees,{degrees=it},enabled=!busy&&!draft,label={Text("选区旋转角度（不旋转作品）")})
+    val angle=degrees.toDoubleOrNull()?.takeIf {it.isFinite() && kotlin.math.abs(it)<=36000}
+    TextButton(enabled=!busy&&!draft&&selection!=null&&angle!=null,onClick={
+        onRotate(JSONObject().put("documentId",snapshot.getString("id")).put("expectedRevision",snapshot.getInt("revision")).put("degrees",angle))
+    }) {Text("旋转选区")}
+    var maskName by remember {mutableStateOf("选区蒙版")}
+    OutlinedTextField(maskName,{maskName=it.take(100)},enabled=!busy&&!draft,label={Text("独立选区蒙版名称")})
+    fun maskRequest(action:String)=JSONObject().put("documentId",snapshot.getString("id")).put("expectedRevision",snapshot.getInt("revision")).put("action",action)
+    TextButton(enabled=!busy&&!draft&&selection!=null&&maskName.isNotBlank(),onClick={onMask(maskRequest("save").put("name",maskName))}) {Text("保存为选区蒙版图层")}
+    val masks=ArtSelectionMasks.list(snapshot.getJSONObject("state"))
+    for(i in 0 until masks.length()) {
+        val item=masks.getJSONObject(i)
+        Row {
+            TextButton(enabled=!busy&&!draft,onClick={onMask(maskRequest("activate").put("id",item.getString("id")))}) {Text("恢复："+item.getString("name"))}
+            TextButton(enabled=!busy&&!draft&&selection!=null&&!item.getBoolean("locked"),onClick={onMask(maskRequest("replace").put("id",item.getString("id")))}) {Text("以当前选区更新")}
+            TextButton(enabled=!busy&&!draft&&!item.getBoolean("locked"),onClick={onMask(maskRequest("delete").put("id",item.getString("id")))}) {Text("删除")}
+        }
     }
     Text("点击放节点，按住拖动拉出切线。点回起点、双击末节点或按完成，闭合为选区；不会绘制作品笔画。")
     Row {

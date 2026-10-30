@@ -12,7 +12,7 @@ import kotlin.math.roundToInt
 
 @Composable
 internal fun StudioColorizeOptions(snapshot: JSONObject,selected: String,busy: Boolean,width: Float,erase: Boolean,
-    color: String,onWidth: (Float)->Unit,onErase: (Boolean)->Unit,onColor: (String)->Unit,
+    color: String,linearRGBA:org.json.JSONArray?,onLinear:(org.json.JSONArray?)->Unit,onWidth: (Float)->Unit,onErase: (Boolean)->Unit,onColor: (String)->Unit,
     onCreate: (JSONObject)->Unit,onUpdate: (JSONObject)->Unit,
     onEdit: (String,JSONObject)->Unit) {
     val state=snapshot.getJSONObject("state")
@@ -21,8 +21,9 @@ internal fun StudioColorizeOptions(snapshot: JSONObject,selected: String,busy: B
     var confirm by remember(selected) {mutableStateOf("")}
     var confirmationParams by remember(selected) {mutableStateOf<JSONObject?>(null)}
     Text("在线稿上首次点击建立蒙版，再用不同前景色画线索；点击更新生成填色。线索和结果分别保存。")
+    StudioHdrColorControls("HDR线索填色",linearRGBA,!busy,onLinear)
     if(layer==null || layer.getString("kind")!="colorize") {
-        TextButton(enabled=!busy && layer?.getString("kind") in setOf("paint","image"),onClick={
+        TextButton(enabled=!busy && layer?.getString("kind") in setOf("paint","image","group"),onClick={
             onCreate(JSONObject().put("documentId",snapshot.getString("id"))
                 .put("expectedRevision",snapshot.getInt("revision")).put("sourceLayerId",selected))
         }) {Text("从当前线稿建立上色蒙版")}
@@ -32,7 +33,7 @@ internal fun StudioColorizeOptions(snapshot: JSONObject,selected: String,busy: B
         Text(if(ArtColorize.dirty(state,layer))"线索或源线稿已变化，需更新结果" else "填色结果已更新")
         val sourceName=ArtMenuOperations.layers(state).firstOrNull {it.getString("id")==data.getString("sourceLayerId")}?.getString("name") ?: "已删除"
         Text("线索 ${ArtColorize.items(layer).size} 笔；线稿：$sourceName")
-        if(!ArtColorize.canUpdate(state,layer))Text("当前源或蒙版已隐藏、移动、分组，或源已删除；请恢复有效的根线稿后更新。缓存结果可转换为绘画层。")
+        if(!ArtColorize.canUpdate(state,layer))Text("当前源或蒙版已隐藏、锁定或源已删除；请恢复可见可编辑状态后更新。缓存结果可转换为绘画层。")
         TextButton(onClick={onUpdate(params())},enabled=editable && ArtColorize.canUpdate(state,layer)) {Text(if(busy)"处理中…" else "更新填色结果")}
         for(key in listOf("editKeys","showOutput","limitBounds")) {
             val label=when(key) {"editKeys"->"编辑颜色线索";"showOutput"->"显示填色结果";else->"限制到线稿和线索边界"}
@@ -47,18 +48,20 @@ internal fun StudioColorizeOptions(snapshot: JSONObject,selected: String,busy: B
         Row(Modifier.horizontalScroll(rememberScrollState())) {
             ArtColorize.palette(layer).forEach {c ->
                 val value=c.getString("color")
-                FilterChip(selected=value==color,enabled=editable,onClick={onColor(value);onErase(false)},
-                    label={Text(value+if(c.getBoolean("transparent"))" 透明" else "",color=Color(android.graphics.Color.parseColor(value)))})
+                val chosen=JSONObject().put("color",color).apply {linearRGBA?.let {put("linearRGBA",it)}}
+                FilterChip(selected=ArtColorize.colorTag(c)==ArtColorize.colorTag(chosen),enabled=editable,onClick={onColor(value);onLinear(c.optJSONArray("linearRGBA"));onErase(false)},
+                    label={Text(value+(if(c.has("linearRGBA"))" HDR" else "")+if(c.getBoolean("transparent"))" 透明" else "",color=Color(android.graphics.Color.parseColor(value)))})
             }
         }
-        val current=ArtColorize.palette(layer).firstOrNull {it.getString("color")==color}
+        val chosen=JSONObject().put("color",color).apply {linearRGBA?.let {put("linearRGBA",it)}}
+        val current=ArtColorize.palette(layer).firstOrNull {ArtColorize.colorTag(it)==ArtColorize.colorTag(chosen)}
         if(current!=null) {
             TextButton(enabled=editable,onClick={
-                onEdit("COLORIZE_PALETTE",params().put("color",color).put("action","transparent")
+                onEdit("COLORIZE_PALETTE",params().put("color",color).apply {linearRGBA?.let {put("linearRGBA",it)}}.put("action","transparent")
                     .put("transparent",!current.getBoolean("transparent")))
             }) {Text(if(current.getBoolean("transparent"))"取消透明标记" else "标记该色为透明区域")}
             TextButton(enabled=editable,onClick={
-                confirmationParams=params().put("color",color).put("action","remove");confirm="color"
+                confirmationParams=params().put("color",color).apply {linearRGBA?.let {put("linearRGBA",it)}}.put("action","remove");confirm="color"
             }) {Text("删除该色全部线索")}
         }
         Text("暗线屏障阈值：${settings.getInt("threshold")}")

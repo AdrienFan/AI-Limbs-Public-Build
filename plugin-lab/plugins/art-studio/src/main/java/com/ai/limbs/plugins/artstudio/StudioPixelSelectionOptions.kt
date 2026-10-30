@@ -34,7 +34,7 @@ private fun SelectionToolModes(settings:JSONObject,enabled:Boolean,onSet:(String
     }
     FilterChip(selected=settings.getBoolean("limitToSelection"),enabled=enabled,
         onClick={onSet("limitToSelection",!settings.getBoolean("limitToSelection"))},label={Text("仅在现有选区范围查找")})
-    Text("参考保留图层变换，不包含背景、参考图像、尺规和蒙版编辑线索。当前层按原始透明度读取；选择实际内容层，图层组请用可见层参考。")
+    Text("参考保留图层变换，不包含背景、参考图像、尺规和蒙版编辑线索。当前层按原始透明度读取；当前组包含组内可见内容。")
 }
 @Composable
 internal fun StudioColorSelectionOptions(settings: JSONObject,connected: Boolean,busy: Boolean,onSettings: (JSONObject)->Unit) {
@@ -72,6 +72,7 @@ internal fun StudioColorSelectionOptions(settings: JSONObject,connected: Boolean
 }
 @Composable
 internal fun StudioMagneticSelectionOptions(settings: JSONObject,busy: Boolean,hasDraft: Boolean,prepared: Boolean,
+    saved:JSONObject?,
     onSettings: (JSONObject)->Unit,onCommand: (String)->Unit) {
     fun set(key: String,value: Any) {onSettings(JSONObject(settings.toString()).put(key,value))}
     val enabled=!busy && !hasDraft
@@ -86,7 +87,18 @@ internal fun StudioMagneticSelectionOptions(settings: JSONObject,busy: Boolean,h
         TextButton(enabled=hasDraft,onClick={onCommand("cancel")}) {Text("取消")}
     }
     Text("闭合后仍可拖动锚点，点击边缘插入锚点，拖出参考范围删除。确认前不改变原选区；Esc／右键／双指取消，确认只记录一次选区。")
-    SelectionToolModes(settings,enabled,::set)
+    if(saved!=null) {
+        Row {
+            TextButton(enabled=enabled,onClick={onSettings(ArtMagneticSelection.options(saved))}) {Text("载入原参数")}
+            TextButton(enabled=enabled && prepared,onClick={onCommand("reopen")}) {Text("重新编辑锚点")}
+        }
+        Text("已提交锚点随工程保存。重新编辑会在确认时替换原磁性操作，保留该操作之前的选区组合；取消不改变当前选区。")
+    }
+    Row {
+        listOf("sobel" to "对比边缘","log" to "LoG边缘").forEach {(id,label)->
+            FilterChip(selected=settings.getString("edgeModel")==id,enabled=enabled,onClick={set("edgeModel",id)},label={Text(label)})}
+    }
+    SelectionToolModes(settings,enabled,::set,labels=true)
     StudioSoftSelectionControls(settings,enabled,::set)
     if(hasDraft)Text("这条路径使用开始时的参考和参数；完成或取消后再修改参数。",color=Color.Gray)
     for((key,label,range) in listOf(Triple("filterRadius","边缘采样半径",1f..4f),

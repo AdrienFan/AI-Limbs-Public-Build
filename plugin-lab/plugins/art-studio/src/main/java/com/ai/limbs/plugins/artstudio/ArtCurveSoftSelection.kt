@@ -45,7 +45,7 @@ internal object ArtCurveSoftSelection {
             }
         }.toMutableList()
     }
-    private fun build(parts:List<JSONObject>,w:Int,h:Int):JSONObject {
+    fun rebuild(parts:List<JSONObject>,w:Int,h:Int):JSONObject {
         require(parts.size in 1..ArtBezierSelection.MAX_PARTS) {"复合选区最多32分量，请替换选区"}
         var result:JSONObject?=null
         for(part in parts) {
@@ -64,16 +64,16 @@ internal object ArtCurveSoftSelection {
         val item=JSONObject().put("mode",mode).put("selection",geometry).put("options",o)
         val entries=if(mode=="replace" || (current==null && mode in setOf("add","xor")))mutableListOf<JSONObject>() else if(current!=null)parts(current) else mutableListOf(JSONObject().put("mode","replace").put("selection",ArtBezierSelection.empty()))
         if(entries.isEmpty())item.put("mode","replace")
-        entries.add(item);return build(entries,w,h)
+        entries.add(item);return rebuild(entries,w,h)
     }
     fun edit(s:JSONObject,index:Int,edits:JSONArray,w:Int,h:Int):JSONObject {
         val entries=parts(s);require(index in entries.indices)
         val part=entries[index];part.put("selection",ArtBezierSelection.edited(part.getJSONObject("selection"),0,edits))
-        return build(entries,w,h)
+        return rebuild(entries,w,h)
     }
     fun append(current:JSONObject?,mask:JSONObject,mode:String,w:Int,h:Int):JSONObject {
         if(mode=="replace" || current?.has("curveParts")!=true)return ArtSoftSelection.combine(current,mask,mode,w,h)
         val entries=parts(current);entries.add(JSONObject().put("mode",mode).put("selection",plain(mask)))
-        return build(entries,w,h)
+        return rebuild(entries,w,h)
     }
 }

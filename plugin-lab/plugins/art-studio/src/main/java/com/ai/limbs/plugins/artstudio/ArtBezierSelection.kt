@@ -12,7 +12,7 @@ internal object ArtBezierSelection {
     const val MAX_PARTS=32
     const val MAX_TOTAL_NODES=8192
     val modes=ArtSoftSelection.modes
-    val pending=listOf("角度吸附","任意旋转选区","独立选区蒙版图层")
+    val pending=emptyList<String>()
     fun info()=JSONObject().put("modes",JSONObject(modes)).put("maxNodes",MAX_NODES)
         .put("maxParts",MAX_PARTS).put("maxTotalNodes",MAX_TOTAL_NODES)
         .put("defaults",ArtSoftSelection.defaults()).put("softSelection",ArtSoftSelection.info())
@@ -113,6 +113,13 @@ internal object ArtBezierSelection {
         for(i in 0 until edits.length()) {
             val edit=edits.getJSONObject(i)
             require(edit.getString("action")!="closed") {"曲线选区必须保持闭合"}
+            val action=edit.getString("action");val step=edit.optDouble("angleStep",0.0)
+            if(action in setOf("move_node","move_handle") && step!=0.0) {
+                val index=edit.getInt("node");require(index in nodes.indices)
+                val origin=if(action=="move_handle")nodes[index].point else nodes[(index+nodes.size-1)%nodes.size].point
+                val point=ArtSelectionTransform.snapped(origin,ArtPathGeometry.Vec(edit.getDouble("x"),edit.getDouble("y")),step)
+                edit.put("x",point.x).put("y",point.y)
+            }
             ArtPathGeometry.apply(nodes,true,edit)
             require(nodes.size in 2..MAX_NODES) {"选区至少保留两个节点"}
         }

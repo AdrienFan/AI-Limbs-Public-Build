@@ -15,14 +15,15 @@ internal object ArtMagneticSelection {
     const val MAX_PATH_POINTS=32768
     data class Point(val x: Double,val y: Double)
     data class Image(val documentId: String,val revision: Int,val layerId: String,val reference: String,
-        val filterRadius: Int,val rect: Rect,val edges: FloatArray)
+        val filterRadius: Int,val rect: Rect,val edges: ArtMagneticEdges,val referenceKey:String)
     fun defaults()=JSONObject().put("mode","replace").put("reference","visible").put("filterRadius",1)
         .put("searchRadius",16).put("threshold",24).put("strength",8.0).put("anchorGap",40)
-        .put("precision",0.75).put("limitToSelection",false).put("antialias",1).put("feather",0).put("expand",0)
-    val pending=listOf("提交后恢复磁性锚点编辑","颜色标签参考","LoG边缘预处理及分块缓存")
+        .put("edgeModel","sobel").put("colorLabels",JSONArray().put(1)).put("precision",0.75).put("limitToSelection",false).put("antialias",1).put("feather",0).put("expand",0)
+    val pending=emptyList<String>()
     fun options(p: JSONObject): JSONObject {
         val o=defaults();o.keys().forEach {if(p.has(it))o.put(it,p.get(it))}
-        require(o.getString("mode") in ArtBezierSelection.modes && o.getString("reference") in setOf("current","visible"))
+        require(o.getString("mode") in ArtBezierSelection.modes && o.getString("reference") in setOf("current","visible","labels"))
+        ArtLayerLabels.parse(o.getJSONArray("colorLabels"));require(o.getString("edgeModel") in setOf("sobel","log"))
         require(o.getInt("filterRadius") in 1..4 && o.getInt("searchRadius") in 2..64 && o.getInt("threshold") in 0..255)
         require(o.getDouble("strength").isFinite() && o.getDouble("strength") in 1.0..20.0)
         require(o.getDouble("precision").isFinite() && o.getDouble("precision") in 0.25..4.0)
@@ -33,40 +34,16 @@ internal object ArtMagneticSelection {
     fun info()=JSONObject().put("softSelection",ArtSoftSelection.info()).put("modes",JSONObject(ArtSoftSelection.modes)).put("defaults",defaults()).put("pending",JSONArray(pending))
         .put("phoneStages","绘制→闭合调整→确认；闭合后可拖动、增删锚点，确认前保留原选区，取消不写历史；最终确认后不持久保存磁性锚点")
         .put("maxAnchors",MAX_ANCHORS).put("maxSearchPixels",MAX_SEARCH_PIXELS).put("maxPathPoints",MAX_PATH_POINTS)
-        .put("maxReferencePixels",ArtRasterSelection.MAX_PIXELS).put("algorithm","RGBA Sobel contrast + eight-neighbor A* live wire")
+        .put("maxReferencePixels",ArtRasterSelection.MAX_PIXELS).put("algorithm","RGBA Sobel/scale-normalized LoG, lazy 64px tiles (128 cached), eight-neighbor A* live wire")
     fun image(snapshot: JSONObject,bitmap: Bitmap,p: JSONObject): Image {
         val o=options(p);val state=snapshot.getJSONObject("state");val rect=ArtColorSelection.bounds(state,p)
-        val w=rect.width();val h=rect.height();val pixels=IntArray(w*h);bitmap.getPixels(pixels,0,w,rect.left,rect.top,w,h)
-        // Premultiplication removes invisible RGB noise; alpha is an edge channel in its own right.
-        for(i in pixels.indices) {
-            val c=pixels[i];val a=c ushr 24
-            pixels[i]=(a shl 24) or (((c ushr 16 and 255)*a/255) shl 16) or
-                (((c ushr 8 and 255)*a/255) shl 8) or ((c and 255)*a/255)
-        }
-        val edges=FloatArray(w*h);val r=o.getInt("filterRadius")
-        fun at(x: Int,y: Int)=pixels[y.coerceIn(0,h-1)*w+x.coerceIn(0,w-1)]
-        for(y in 0 until h)for(x in 0 until w) {
-            val tl=at(x-r,y-r);val tc=at(x,y-r);val tr=at(x+r,y-r)
-            val ml=at(x-r,y);val mr=at(x+r,y)
-            val bl=at(x-r,y+r);val bc=at(x,y+r);val br=at(x+r,y+r)
-            var magnitude=0.0
-            for(channel in 0..3) {
-                val shift=channel*8
-                fun c(v: Int)=(v ushr shift) and 255
-                val gx=c(tr)+2*c(mr)+c(br)-c(tl)-2*c(ml)-c(bl)
-                val gy=c(bl)+2*c(bc)+c(br)-c(tl)-2*c(tc)-c(tr)
-                magnitude=max(magnitude,hypot(gx.toDouble(),gy.toDouble())/(4*255.0))
-            }
-            edges[y*w+x]=magnitude.coerceIn(0.0,1.0).toFloat()
-        }
-        return Image(snapshot.getString("id"),snapshot.getInt("revision"),p.getString("layerId"),o.getString("reference"),r,Rect(rect),edges)
+        val w=rect.width();val h=rect.height();val pixels=ArtFloatPixels.read(bitmap,rect)
+        val edges=ArtMagneticEdges(pixels,w,h,o.getInt("filterRadius"),o.getString("edgeModel"))
+        return Image(snapshot.getString("id"),snapshot.getInt("revision"),p.getString("layerId"),
+            o.getString("reference"),o.getInt("filterRadius"),rect,edges,referenceKey(o))
     }
-    fun anchors(raw: JSONArray): List<Point> {
-        require(raw.length() in 1..MAX_ANCHORS) {"磁性路径需要1–128锚点"}
-        return (0 until raw.length()).map {i->val q=raw.getJSONArray(i);require(q.length()==2)
-            Point(q.getDouble(0),q.getDouble(1)).also {require(it.x.isFinite() && it.y.isFinite())}}
-    }
-    fun json(points: List<Point>)=JSONArray().apply {points.forEach {put(JSONArray().put(it.x).put(it.y))}}
+    fun referenceKey(options:JSONObject)=options.getString("reference")+":"+options.getJSONArray("colorLabels").toString()+":"+options.getString("edgeModel")
+
     private data class Visit(val index: Int,val cost: Float,val rank: Float)
     fun segment(image: Image,a: Point,b: Point,p: JSONObject,cancelled: ()->Boolean={false}): List<Point> {
         val o=options(p);val bounds=image.rect;val radius=o.getInt("searchRadius")
@@ -104,7 +81,7 @@ internal object ArtMagneticSelection {
                 val nx=x+ox;val ny=y+oy
                 if(nx !in left until right || ny !in top until bottom || !inCorridor(nx,ny))continue
                 val j=(ny-top)*w+nx-left;if(done[j])continue
-                val contrast=image.edges[ny*bounds.width()+nx]
+                val contrast=image.edges.at(nx,ny,cancelled)
                 val edge=if(contrast*255>=threshold)contrast else 0f
                 val step=if(ox==0 || oy==0)1f else 1.4142136f
                 val cost=current.cost+step*(1f+strength*(1f-edge)*(1f-edge))

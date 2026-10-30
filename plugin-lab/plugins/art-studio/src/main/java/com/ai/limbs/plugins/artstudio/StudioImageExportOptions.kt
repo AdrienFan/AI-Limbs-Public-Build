@@ -43,6 +43,7 @@ internal fun StudioImageExportOptions(context: JSONObject, fullAnimation: Boolea
                 }
             }
             Text(ArtExportFormats.get(format).notice, style = MaterialTheme.typography.bodySmall)
+            if(format!="exr")Text("此格式导出为SDR，超出sRGB的亮度／颜色会裁限；需要保留HDR请选择OpenEXR。工程原像素保持16位浮点。",style=MaterialTheme.typography.bodySmall)
             support.filter { !it.available }.groupBy { it.reason }.forEach { (reason, items) ->
                 Text(items.joinToString(" / ") { it.format.label } + "：" + reason, style = MaterialTheme.typography.bodySmall)
             }

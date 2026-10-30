@@ -8,6 +8,7 @@ import org.json.JSONObject
 internal object ArtImageFormats {
     private data class Format(val name: String, val mimes: List<String>, val extensions: List<String>)
     private val formats = listOf(
+        Format("OpenEXR", listOf("image/x-exr","image/aces"), listOf("exr")),
         Format("PNG", listOf("image/png"), listOf("png")),
         Format("JPEG", listOf("image/jpeg"), listOf("jpg", "jpeg", "jpe")),
         Format("WebP", listOf("image/webp"), listOf("webp")),
@@ -22,11 +23,12 @@ internal object ArtImageFormats {
         formats.forEach { format ->
             put(JSONObject().put("name", format.name).put("mimeTypes", JSONArray(format.mimes))
                 .put("extensions", JSONArray(format.extensions))
-                .put("decoderAvailable", format.mimes.any { ImageDecoder.isMimeTypeSupported(it) })
+                .put("decoderAvailable", format.name=="OpenEXR" || format.mimes.any { ImageDecoder.isMimeTypeSupported(it) })
                 .put("importMode", "static_bitmap"))
         }
     }).put("export", ArtExportFormats.describe()).put("detection", "encoded_content").put("animatedImport", "first_frame")
-        .put("workingColorSpace", "sRGB").put("workingBitDepth", 8)
+        .put("workingColorSpace", "linear-extended-sRGB").put("workingBitDepth", 16).put("workingPixelType","float")
+        .put("exrScope","single-part scanline RGB(A)/Y(A), HALF/FLOAT, NONE/ZIPS/ZIP; chromaticities converted to linear Rec.709 with Bradford adaptation")
         .put("inputByteLimit", ArtStore.MAX_IMAGE_INPUT_BYTES)
         .put("assetByteLimit", ArtStore.MAX_ASSET_BYTES)
         .put("notice", "GIF 和动态 WebP 当前只导入首帧。HEIC/HEIF、AVIF 依赖当前运行环境的系统解码器；无法解码会明确报错。")

@@ -108,6 +108,18 @@ internal class StudioMagneticSelectionInteraction(private val view: View) {
         require(insert>=0 && best<=20*view.resources.displayMetrics.density) {"请点击闭合边缘附近以插入锚点"}
         anchors.add(insert,q);editing=insert;cache.clear();request(true)
     }
+    fun reopen(saved:JSONObject,documentId:String,revision:Int,layerId:String,m:Matrix,onCommit:(JSONObject)->Unit) {
+        require(!hasDraft) {"请先完成或取消当前路径"}
+        val image=source ?: error("磁性参考正在准备，请稍候")
+        val o=ArtMagneticSelection.options(saved)
+        require(image.documentId==documentId && image.revision==revision && image.layerId==layerId &&
+            image.referenceKey==ArtMagneticSelection.referenceKey(o) && image.filterRadius==o.getInt("filterRadius")) {"请先载入原参数，等待参考准备完成"}
+        val restored=ArtMagneticSelection.anchors(saved.getJSONArray("anchors"))
+        require(restored.size>=3 && restored.all {image.rect.contains(floor(it.x).toInt(),floor(it.y).toInt())}) {"保存的锚点不在当前参考范围"}
+        require(m.invert(inverse));matrix=Matrix(m);frozenImage=image
+        capture=o.put("documentId",documentId).put("expectedRevision",revision).put("layerId",layerId).put("reedit",true)
+        anchors.addAll(restored);commit=onCommit;onDraft(true);request(true)
+    }
     fun command(action: String) {
         when(action) {
             "cancel"->cancel()
@@ -125,7 +137,7 @@ internal class StudioMagneticSelectionInteraction(private val view: View) {
             val image=source ?: error("磁性参考正在准备，请稍候")
             require(image.documentId==documentId && image.revision==revision && image.layerId==layerId) {"参考已变化，请等待重新准备"}
             val o=ArtMagneticSelection.options(options)
-            require(image.reference==o.getString("reference") && image.filterRadius==o.getInt("filterRadius"))
+            require(image.referenceKey==ArtMagneticSelection.referenceKey(o) && image.filterRadius==o.getInt("filterRadius"))
             require(m.invert(inverse));matrix=Matrix(m);frozenImage=image
             // MotionEvent exposes modifier bits via metaState, not KeyEvent convenience properties.
             val shift=event.metaState and KeyEvent.META_SHIFT_MASK!=0

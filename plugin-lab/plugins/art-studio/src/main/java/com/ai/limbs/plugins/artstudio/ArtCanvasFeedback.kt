@@ -18,7 +18,8 @@ internal object ArtCanvasFeedback {
         name in setOf("animation.configure","animation.keyframe","animation.seek","animation.poses.apply") -> true
         name == "menu.execute" ->
             ArtStudioMenuCatalog.find(parameters.getString("action"))?.optBoolean("documentWrite") == true
-        name.startsWith("comic.") -> name!="comic.info"
+        name.startsWith("comic.") -> name !in setOf("comic.info","comic.presets")
+        name=="selection.mask" && parameters.optString("action")=="list" -> false
         name.startsWith("colorize.") -> name !in setOf("colorize.list","colorize.preview")
         name.startsWith("assistant.") -> name !in setOf("assistant.list","assistant.project","assistant.preview")
         name.startsWith("reference.") -> name !in setOf("reference.info","reference.list","reference.preview","reference.region","reference.collection_export")

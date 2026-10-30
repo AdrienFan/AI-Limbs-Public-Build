@@ -16,6 +16,7 @@ android {
         targetSdk = 34
         versionCode = 102
         versionName = "0.2.99"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86") }
         externalNativeBuild { cmake { arguments += "-DANDROID_STL=c++_static" } }
     }
@@ -26,6 +27,7 @@ android {
     buildFeatures { buildConfig = false; compose = true }
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.31.0" } }
     androidResources { additionalParameters += listOf("--package-id", "0x80") }
+    sourceSets.getByName("androidTest").assets.srcDir("src/test/resources")
 }
 kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 
@@ -41,4 +43,10 @@ dependencies {
     testImplementation(project(":plugin-inprocess-api"))
     testImplementation(libs.junit)
     testImplementation(libs.json.jvm)
+    androidTestImplementation(project(":plugin-inprocess-api"))
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+}
+tasks.withType<Test>().configureEach {
+    systemProperty("artstudio.hdr.output", layout.buildDirectory.dir("hdr-tests").get().asFile.absolutePath)
 }

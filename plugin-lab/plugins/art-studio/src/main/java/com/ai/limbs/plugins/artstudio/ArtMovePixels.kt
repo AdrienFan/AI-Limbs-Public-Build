@@ -31,18 +31,15 @@ internal object ArtMovePixels {
         val pixels=ArtRenderer.render(store,source,logicalSize=document.getInt("width") to document.getInt("height"))
         var visible=0
         val bytes=try {
-            val row=IntArray(w)
-            for(y in 0 until h) {
-                pixels.getPixels(row,0,w,0,y,w,1)
-                for(x in 0 until w) {
-                    val alpha=maskedAlpha(Color.alpha(row[x]),coverage[y*w+x].toInt() and 255)
-                    if(alpha>0)visible++
-                    row[x]=(row[x] and 0x00ffffff) or (alpha shl 24)
-                }
-                pixels.setPixels(row,0,w,0,y,w,1)
+            val values=ArtFloatPixels.read(pixels)
+            for(i in coverage.indices) {
+                val amount=(coverage[i].toInt() and 255)/255f
+                for(c in 0..3)values[i*4+c]*=amount
+                if(values[i*4+3]>0)visible++
             }
             require(visible>0) {"选区内没有可搬移的可见像素"}
-            ArtImagePolicy.encodePng(pixels,ArtStore.MAX_ASSET_BYTES)
+            ArtFloatPixels.write(pixels,values)
+            ArtImagePolicy.encodeAsset(pixels,ArtStore.MAX_ASSET_BYTES)
         } finally {pixels.recycle()}
         return Capture(bytes,bounds,canonical,visible)
     }

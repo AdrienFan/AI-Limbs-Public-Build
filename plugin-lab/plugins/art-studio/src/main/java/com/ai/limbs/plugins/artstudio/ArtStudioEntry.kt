@@ -448,6 +448,7 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("shape.hit", "命中矢量形状", read) { p -> store.shapes(p, true) }
         capability("shape.box", "查询框内矢量对象", read) { p -> store.shapes(p, box = true) }
         capability("comic.info","读取漫画分格范围与默认参数",read) {ArtComicPanels.info()}
+        capability("comic.presets","管理分格单位和宽度预设",write) {p->store.comicProfiles(p)}
         capability("comic.frame","创建漫画分格框",write) {p->store.comicFrame("LANER",p)}
         capability("comic.cut","切分漫画矢量分格",write) {p->store.comicEdit("LANER","cut",p)}
         capability("comic.merge","合并相邻漫画分格",write) {p->store.comicEdit("LANER","merge",p)}
@@ -492,6 +493,8 @@ class ArtStudioEntry : InProcessPluginEntry {
         }
         capability("selection.basic_info","读取基本软选区参数",read) {ArtSoftSelection.info()}
         capability("selection.adjust","羽化或扩展收缩当前选区",write) {p->store.adjustSelection("LANER",p)}
+        capability("selection.rotate","旋转选区及可编辑曲线轮廓",write) {p->store.rotateSelection("LANER",p)}
+        capability("selection.mask","保存、恢复及管理独立选区蒙版图层",write) {p->store.selectionMask("LANER",p)}
         capability("selection.coverage","读取选区坐标的覆盖率",read) {p->store.selectionCoverage(p)}
         capability("selection.create","创建矩形软选区",write) {p->store.basicSelection("LANER",p.put("shape","rect"))}
         capability("selection.freehand","创建自由套索软选区",write) {p->store.basicSelection("LANER",p.put("shape","freehand"))}
@@ -606,6 +609,7 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("image.formats", "读取画室图片格式支持", read) {
             ArtImageFormats.describe()
         }
+        capability("image.sample_linear","读取HDR线性浮点像素",read) {p->store.sampleLinear(p)}
         capability("image.limits", "读取图片尺寸与内存预算", read) {
             ArtImagePolicy.describe()
         }
@@ -727,15 +731,16 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "selection.similar" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("x","integer"),p("y","integer"),
             p("mode",optional=true),p("reference",optional=true),p("tolerance","integer",true),p("expand","integer",true),p("limitToSelection","boolean",true),p("bounds","object",true))+colorSelectionFields()
         "selection.magnetic_trace", "selection.magnetic_create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("anchors","array"),
-            p("mode",optional=true),p("reference",optional=true),p("filterRadius","integer",true),p("searchRadius","integer",true),
+            p("mode",optional=true),p("reference",optional=true),p("filterRadius","integer",true),p("edgeModel",optional=true),p("colorLabels","array",true),p("searchRadius","integer",true),
             p("threshold","integer",true),p("strength","number",true),p("precision","number",true),p("limitToSelection","boolean",true),p("bounds","object",true)) +
-            if(name=="selection.magnetic_trace")listOf(p("closed","boolean",true)) else softSelectionFields()
+            if(name=="selection.magnetic_trace")listOf(p("closed","boolean",true)) else softSelectionFields()+p("reedit","boolean",true)
+        "comic.presets" -> listOf(p("action"),p("expectedSettingsRevision","integer",true),p("id",optional=true),p("name",optional=true),p("settings","object",true))
         "comic.frame" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),
             p("x","number"),p("y","number"),p("width","number"),p("height","number"),p("style","object",true))
         "comic.cut" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("start","array"),p("end","array"),
             p("ids","array",true),p("automatic","boolean",true),p("preset",optional=true),
             p("thick","number",true),p("thin","number",true),p("special","number",true),
-            p("horizontal",optional=true),p("vertical",optional=true),p("diagonal",optional=true),p("angle","number",true))
+            p("horizontal",optional=true),p("vertical",optional=true),p("diagonal",optional=true),p("angle","number",true),p("unit",optional=true),p("ppi","number",true))
         "comic.merge" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("start","array"),p("end","array"),p("ids","array",true))
         "shape.list" -> listOf(p("documentId"), p("layerId"))
         "shape.hit" -> listOf(p("documentId"), p("layerId"), p("x", "number"), p("y", "number"), p("tolerance", "number", true))
@@ -794,17 +799,20 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "view.state" -> listOf(p("target", optional = true))
         "view.command" -> listOf(p("command"), p("target", optional = true))
         "colorize.list" -> listOf(p("documentId"),p("expectedRevision","integer",true),p("maskId",optional=true),p("includeKeys","boolean",true))
+        "image.sample_linear" -> listOf(p("documentId"),p("expectedRevision","integer",true),p("x","integer"),p("y","integer"),p("layerId",optional=true),p("reference",optional=true),p("colorLabels","array",true))
         "colorize.preview" -> listOf(p("documentId"),p("expectedRevision","integer",true),p("maskId",optional=true))
         "colorize.create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("sourceLayerId"),p("name",optional=true))
         "colorize.stroke" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"),
-            p("points","array"),p("width","number"),p("color",optional=true),p("erase","boolean",true))
+            p("points","array"),p("width","number"),p("color",optional=true),p("linearRGBA","array",true),p("erase","boolean",true))
         "colorize.remove_stroke" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"),p("strokeId"))
         "colorize.palette" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"),
-            p("color"),p("action"),p("transparent","boolean",true))
+            p("color"),p("linearRGBA","array",true),p("action"),p("transparent","boolean",true))
         "colorize.settings" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"),p("settings","object"))
         "colorize.clear","colorize.update","colorize.convert" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"))
         "selection.basic_info", "selection.bezier_info" -> emptyList()
         "selection.adjust" -> listOf(p("documentId"),p("expectedRevision","integer"),p("expand","integer",true),p("feather","integer",true))
+        "selection.rotate" -> listOf(p("documentId"),p("expectedRevision","integer"),p("degrees","number"),p("pivotX","number",true),p("pivotY","number",true))
+        "selection.mask" -> listOf(p("documentId"),p("expectedRevision","integer"),p("action"),p("id",optional=true),p("name",optional=true))
         "selection.coverage" -> listOf(p("documentId"),p("expectedRevision","integer"),p("x","number"),p("y","number"))
         "selection.bezier_create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("nodes","array"),p("mode",optional=true))+softSelectionFields()
         "selection.bezier_nodes" -> listOf(p("documentId"),p("expectedRevision","integer",true),p("componentIndex","integer",true))
@@ -814,7 +822,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "gradient.draw" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("points","array"),p("color"),p("opacity","number",true))+gradientFields()
         "enclose.info" -> emptyList()
         "enclose.apply" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("shape"),
-            p("points","array",true),p("nodes","array",true),p("color",optional=true),p("mode",optional=true),p("regionColor",optional=true),
+            p("points","array",true),p("nodes","array",true),p("color",optional=true),p("linearRGBA","array",true),p("regionLinearRGBA","array",true),p("mode",optional=true),p("regionColor",optional=true),
             p("tolerance","integer",true),p("includeContour","boolean",true),p("includeSurrounding","boolean",true),p("invert","boolean",true),
             p("reference",optional=true),p("width","integer",true),p("opacity","number",true),
             p("erase","boolean",true),p("expand","integer",true),p("gapClose","integer",true),
@@ -823,7 +831,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "patch.apply" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),
             p("points","array"),p("width","number"),p("patchRadius","integer",true),
             p("accuracy","integer",true),p("searchRadius","integer",true),p("feather","integer",true),
-            p("levels","integer",true),p("refinementStep","integer",true),p("seed","integer",true))
+            p("levels","integer",true),p("refinementStep","integer",true),p("seed","integer",true),p("reference",optional=true),p("colorLabels","array",true))
         "assistant.list", "assistant.preview" -> listOf(p("documentId"),p("expectedRevision","integer",true))
         "assistant.create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("type"),p("points","array"),p("name",optional=true),
             p("visible","boolean",true),p("enabled","boolean",true),p("locked","boolean",true),p("subdivisions","integer",true),p("rays","integer",true),

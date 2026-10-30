@@ -46,6 +46,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
     private val canvasSession = if (ephemeral) StudioCanvasSession(root) else null
 
     init {
+        ArtNativePixels.configure(root)
         if (canvasSession != null) {
             // The parent creates the entire session. A presentation reader must never recreate it.
             canvasSession.requireActive()
@@ -443,7 +444,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             val layer=(0 until plan.layers.length()).map {plan.layers.getJSONObject(it)}.first {it.getString("id")==id}
             val text=layer.getJSONObject("text");val previous=old.getValue(id).getJSONObject("text")
             val bitmap=ArtText.render(text,ArtImagePolicy.renderBytes(this,state,state.getInt("width"),state.getInt("height")))
-            val bytes=try {ArtImagePolicy.encodePng(bitmap,MAX_ASSET_BYTES)}finally{bitmap.recycle()}
+            val bytes=try {ArtImagePolicy.encodeAsset(bitmap,MAX_ASSET_BYTES)}finally{bitmap.recycle()}
             val asset=UUID.randomUUID().toString();created.add(asset);atomicBytes(assetFile(asset),bytes)
             val delta=floatArrayOf((text.getDouble("cacheOriginX")-previous.getDouble("cacheOriginX")).toFloat(),(text.getDouble("cacheOriginY")-previous.getDouble("cacheOriginY")).toFloat())
             ArtShapes.localMatrix(layer).mapVectors(delta)
@@ -838,7 +839,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         }
         fun raster(bitmap: Bitmap, id: String, name: String): JSONObject {
             val asset = UUID.randomUUID().toString()
-            val bytes = try { ArtImagePolicy.encodePng(bitmap, MAX_ASSET_BYTES) } finally { bitmap.recycle() }
+            val bytes = try { ArtImagePolicy.encodeAsset(bitmap, MAX_ASSET_BYTES) } finally { bitmap.recycle() }
             atomicBytes(assetFile(asset), bytes)
             val result=ArtMenuOperations.rasterLayer(id,name,asset)
             // Replacing an existing layer retains its explicitly stored label. New/merged layers remain unlabeled.
@@ -985,7 +986,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                 val replacements=targets.associate { selected ->
                     val id=selected.getString("id")
                     val input=ArtRenderer.render(this,ArtMenuOperations.isolated(requireNotNull(snap),setOf(id),id))
-                    val output=Bitmap.createBitmap(input.width,input.height,Bitmap.Config.ARGB_8888)
+                    val output=ArtFloatPixels.bitmap(input.width,input.height)
                     try {
                         val canvas=Canvas(output)
                         if(action.endsWith("X")) { canvas.translate(input.width.toFloat(),0f);canvas.scale(-1f,1f) }
@@ -1179,7 +1180,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             ArtImagePolicy.renderBytes(this,state,state.getInt("width"),state.getInt("height"))+
                 ArtReferences.MAX*ArtReferences.PREVIEW_EDGE.toLong()*ArtReferences.PREVIEW_EDGE*8)
         val w=bitmap.width;val h=bitmap.height
-        val png=try { ArtImagePolicy.encodePng(bitmap,MAX_ASSET_BYTES) } finally { bitmap.recycle() }
+        val png=try { ArtImagePolicy.encodeAsset(bitmap,MAX_ASSET_BYTES) } finally { bitmap.recycle() }
         val id=replacing?.getString("id") ?: UUID.randomUUID().toString();val asset=UUID.randomUUID().toString()
         val scale=minOf(1.0,state.getInt("height")*0.5/h)
         val transform=if(p.has("matrix")) p.getJSONArray("matrix")
@@ -1246,7 +1247,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         }
         val frame=JSONObject(snap.toString()).put("state",state)
         val bitmap=ArtRenderer.render(this,frame,maxEdge=if(p.has("maxEdge"))p.getInt("maxEdge") else null)
-        val bytes=try {ArtImagePolicy.encodePng(bitmap,MAX_ASSET_BYTES)} finally {bitmap.recycle()}
+        val bytes=try {ArtImagePolicy.encodeAsset(bitmap,MAX_ASSET_BYTES)} finally {bitmap.recycle()}
         referenceImage(actor,JSONObject(p.toString()).put("base64",Base64.encodeToString(bytes,Base64.NO_WRAP)))
             .put("generatedReference",JSONObject().put("source",source).put("sourceRevision",snap.getInt("revision"))
                 .put("includesReferences",false).put("includesAssistants",false).put("canvasExtent",true))
@@ -1282,11 +1283,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             q.put("id",UUID.randomUUID().toString()).put("asset",UUID.randomUUID().toString())
             val normalized=ArtReferences.normalize(q)
             ArtImagePolicy.requireBytes(reserve+normalized.getInt("width").toLong()*normalized.getInt("height")*8,"参考集合图片验证")
-            val bounds=BitmapFactory.Options().apply {inJustDecodeBounds=true;inScaled=false}
-            BitmapFactory.decodeByteArray(data,0,data.size,bounds)
-            require(bounds.outWidth==q.getInt("width")&&bounds.outHeight==q.getInt("height")) {"集合图片与尺寸声明不一致"}
-            val image=BitmapFactory.decodeByteArray(data,0,data.size,BitmapFactory.Options().apply {inScaled=false;inPreferredConfig=Bitmap.Config.ARGB_8888})
-                ?: error("参考集合PNG无法解码")
+            val image=ArtImagePolicy.decodeAssetBytes(data)
             try {require(image.width==q.getInt("width")&&image.height==q.getInt("height")) {"集合图片与尺寸声明不一致"}} finally {image.recycle()}
             normalized to data
         }
@@ -1304,15 +1301,10 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                 val asset=r.getString("asset")
                 if(asset in map) continue
                 val file=assetFile(asset)
-                val bounds=android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds=true;inScaled=false }
-                android.graphics.BitmapFactory.decodeFile(file.absolutePath,bounds)
-                ArtImagePolicy.requireDimensions(bounds.outWidth,bounds.outHeight)
-                var sample=1
-                while((maxOf(bounds.outWidth,bounds.outHeight)+sample-1)/sample>ArtReferences.PREVIEW_EDGE) sample*=2
-                val bitmap=android.graphics.BitmapFactory.decodeFile(file.absolutePath,
-                    android.graphics.BitmapFactory.Options().apply {
-                        inScaled=false;inSampleSize=sample;inPreferredConfig=Bitmap.Config.ARGB_8888
-                    }) ?: error("参考图像资源无效")
+                val original=ArtImagePolicy.decodeAsset(file)
+                val factor=minOf(1.0,ArtReferences.PREVIEW_EDGE.toDouble()/maxOf(original.width,original.height))
+                val bitmap=if(factor==1.0)original else try {Bitmap.createScaledBitmap(original,
+                    (original.width*factor).toInt().coerceAtLeast(1),(original.height*factor).toInt().coerceAtLeast(1),true)} finally {original.recycle()}
                 map[asset]=bitmap
             }
             return map
@@ -1332,11 +1324,10 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         var sample=1
         while((maxOf(w,h)+sample-1)/sample>edge) sample*=2
         ArtImagePolicy.requireBytes(edge.toLong()*edge*16,"参考图像局部预览")
-        val decoder=android.graphics.BitmapRegionDecoder.newInstance(assetFile(ref.getString("asset")).absolutePath,false)
-            ?: error("参考图像区域解码器不可用")
-        val bitmap=try { decoder.decodeRegion(android.graphics.Rect(x,y,x+w,y+h),
-            android.graphics.BitmapFactory.Options().apply { inSampleSize=sample;inPreferredConfig=Bitmap.Config.ARGB_8888 })
-            ?: error("无法解码参考图像区域") } finally { decoder.recycle() }
+        val original=ArtImagePolicy.decodeAsset(assetFile(ref.getString("asset")))
+        val crop=try {ArtFloatPixels.bitmap(w,h).also {Canvas(it).drawBitmap(original,-x.toFloat(),-y.toFloat(),null)}} finally {original.recycle()}
+        val bitmap=if(sample==1)crop else try {Bitmap.createScaledBitmap(crop,(w+sample-1)/sample,(h+sample-1)/sample,true)} finally {crop.recycle()}
+
         try {
             val encoded=Base64.encodeToString(ArtImagePolicy.encodePng(bitmap,8*1024*1024),Base64.NO_WRAP)
             JSONObject().put("regionPreview",JSONObject().put("referenceId",ref.getString("id"))
@@ -1444,24 +1435,26 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         require(p.getString("reference") in setOf("current","visible","labels"))
         state.put("background","#00000000")
         if(p.getString("reference")=="current") {
-            require(target.getString("kind")!="group") {"当前层参考需要实际内容图层，请选择绘画、图像、文字或矢量层"}
-            val included=mutableSetOf(layerId);var parent=target.optString("parentId")
+            val included=ArtMenuOperations.subtree(state,layerId).map {it.getString("id")}.toMutableSet()
+            val normalized=mutableSetOf(layerId);var parent=target.optString("parentId")
             repeat(all.size+1) {
                 if(parent.isNotBlank()) {
                     require(included.add(parent)) {"图层组循环引用"}
+                    normalized.add(parent)
                     val group=all.first {it.getString("id")==parent};parent=group.optString("parentId")
                 }
             }
             require(parent.isBlank())
             for(layer in all) {
-                layer.put("visible",layer.getString("id") in included)
-                if(layer.getString("id") in included)layer.put("opacity",1.0).put("blend","normal")
+                val id=layer.getString("id")
+                layer.put("visible",id in included && (id in normalized || layer.getBoolean("visible")))
+                if(layer.getString("id") in normalized)layer.put("opacity",1.0).put("blend","normal")
             }
         } else if(p.getString("reference")=="labels") {
             val included=ArtLayerLabels.referenceIds(state,ArtLayerLabels.parse(p.getJSONArray("colorLabels")))
             for(layer in all)layer.put("visible",layer.getString("id") in included)
         }
-        ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this,state,state.getInt("width"),state.getInt("height"))+workingBytes,"选区参考与搜索")
+        ArtImagePolicy.requireBytes(maxOf(ArtImagePolicy.renderBytes(this,state,state.getInt("width"),state.getInt("height")),state.getInt("width").toLong()*state.getInt("height")*8+workingBytes),"选区参考与搜索")
         return ArtRenderer.render(this,view)
     }
     private fun selectionToolRequest(p: JSONObject): JSONObject {
@@ -1489,6 +1482,19 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         val selection=ArtSoftSelection.process(selected,p,state.getInt("width"),state.getInt("height"))
         apply(actor,"SELECTION_TOOL",JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
             .put("selection",selection).put("tool","adjust")).put("selectionFeedback",true)
+    }
+    fun rotateSelection(actor:String,p:JSONObject):JSONObject=locked {
+        val snap=selectionToolRequest(p);val state=snap.getJSONObject("state")
+        val current=state.optJSONObject("selection") ?: error("当前没有选区")
+        val next=ArtSelectionTransform.rotate(current,p,state.getInt("width"),state.getInt("height"))
+        apply(actor,"SELECTION_TOOL",JSONObject(p.toString()).put("selection",next).put("tool","rotate")).put("selectionFeedback",true)
+    }
+    fun selectionMask(actor:String,p:JSONObject):JSONObject=locked {
+        val snap=selectionToolRequest(p);val state=snap.getJSONObject("state")
+        if(p.getString("action")=="list")return@locked JSONObject().put("documentId",snap.getString("id")).put("revision",snap.getInt("revision")).put("masks",ArtSelectionMasks.list(state))
+        val request=JSONObject(p.toString())
+        if(p.getString("action")=="save")request.put("id",UUID.randomUUID().toString())
+        apply(actor,"SELECTION_MASK",request)
     }
     fun selectionCoverage(p:JSONObject):JSONObject = locked {
         val snap=selectionToolRequest(p);val s=snap.getJSONObject("state").optJSONObject("selection") ?: error("当前没有选区")
@@ -1532,11 +1538,39 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         require(!canonical.isEmpty) {"磁性路径没有围出有效面积"}
         val state=snap.getJSONObject("state");val w=state.getInt("width");val h=state.getInt("height")
         val mask=ArtSoftSelection.process(created,o,w,h)
-        val selection=ArtCurveSoftSelection.append(state.optJSONObject("selection"),mask,o.getString("mode"),w,h)
+        val previous=if(p.optBoolean("reedit")) {
+            val saved=state.optJSONObject("selection")?.optJSONObject("magneticSource") ?: error("当前选区没有磁性锚点")
+            saved.optJSONObject("beforeSelection")
+        } else state.optJSONObject("selection")
+        val selection=ArtCurveSoftSelection.append(previous,mask,o.getString("mode"),w,h)
+        val saved=JSONObject(o.toString()).put("anchors",ArtMagneticSelection.json(ArtMagneticSelection.anchors(p.getJSONArray("anchors"))))
+            .put("layerId",p.getString("layerId"))
+        if(previous!=null)saved.put("beforeSelection",JSONObject(previous.toString()).apply {remove("magneticSource")})
+        selection.put("magneticSource",saved)
         apply(actor,"SELECTION_TOOL",JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
             .put("selection",selection).put("tool","magnetic")).put("selectionFeedback",true).put("algorithm","rgba-sobel-live-wire")
     }
 
+    fun comicProfiles(p:JSONObject):JSONObject=locked {
+        val file=File(root,"comic-width-profiles.json")
+        val saved=if(file.isFile)JSONObject(file.readText()) else JSONObject().put("revision",0).put("profiles",JSONArray())
+        val action=p.getString("action")
+        if(action=="list")return@locked saved
+        require(p.getLong("expectedSettingsRevision")==saved.getLong("revision")) {"分格预设已更新，请重新读取"}
+        val profiles=saved.getJSONArray("profiles")
+        if(action=="save") {
+            val id=if(p.has("id"))validateId(p.getString("id")).let {p.getString("id")} else UUID.randomUUID().toString()
+            val name=p.getString("name").trim();require(name.length in 1..64)
+            val item=JSONObject().put("id",id).put("name",name).put("settings",ArtComicPanels.options(p.getJSONObject("settings")))
+            val index=(0 until profiles.length()).firstOrNull {profiles.getJSONObject(it).getString("id")==id}
+            if(index!=null)profiles.put(index,item) else {require(profiles.length()<128);profiles.put(item)}
+        } else {
+            require(action=="delete")
+            val index=(0 until profiles.length()).firstOrNull {profiles.getJSONObject(it).getString("id")==p.getString("id")} ?: error("分格预设不存在")
+            profiles.remove(index)
+        }
+        saved.put("revision",saved.getLong("revision")+1);atomic(file,saved.toString());saved
+    }
     private fun comicRequest(p: JSONObject): JSONObject {
         val snap=current()
         require(p.getString("documentId")==snap.getString("id")) {"工程已切换，请重新读取"}
@@ -1629,11 +1663,25 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             .put("selectedLayerId",state.optString("selectedLayerId")).put("masks",JSONArray(masks))
             .put("scope",ArtColorize.defaults())
     }
+    fun sampleLinear(p:JSONObject):JSONObject=locked {
+        val snap=selectionRequest(p);val state=snap.getJSONObject("state");val x=p.getInt("x");val y=p.getInt("y")
+        require(x in 0 until state.getInt("width") && y in 0 until state.getInt("height")) {"取样点需要在画布内"}
+        val request=JSONObject(p.toString()).put("layerId",p.optString("layerId",state.getString("selectedLayerId")))
+            .put("reference",p.optString("reference","visible")).put("colorLabels",p.optJSONArray("colorLabels") ?: JSONArray().put(1))
+        val bitmap=selectionReference(snap,request,64)
+        val sample=try {ArtFloatPixels.read(bitmap,android.graphics.Rect(x,y,x+1,y+1))} finally {bitmap.recycle()}
+        return@locked JSONObject().put("documentId",snap.getString("id")).put("revision",snap.getInt("revision"))
+            .put("x",x).put("y",y).put("premultipliedLinearRGBA",JSONArray(sample.toList()))
+            .put("linearRGBA",JSONArray((0..3).map {if(it==3 || sample[3]==0f)sample[it] else sample[it]/sample[3]}))
+            .put("colorSpace","linear-extended-sRGB").put("bitDepth",16).put("includesBackground",false)
+    }
     fun colorizeCreate(actor: String,p: JSONObject): JSONObject =
         apply(actor,"COLORIZE_CREATE",JSONObject(p.toString()).put("id",UUID.randomUUID().toString()))
     fun colorizeStroke(actor: String,p: JSONObject): JSONObject = locked {
         val snap=current();val input=JSONObject(p.toString())
-        snap.getJSONObject("state").optJSONObject("selection")?.let {input.put("selection",JSONObject(it.toString()))}
+        val state=snap.getJSONObject("state");val mask=ArtColorize.layer(state,p.getString("maskId"))
+        ArtPixelCoordinates.stamp(input,state,mask)
+        state.optJSONObject("selection")?.let {input.put("selection",JSONObject(it.toString()))}
         apply(actor,"COLORIZE_STROKE",JSONObject(p.toString()).put("stroke",ArtColorize.stroke(input,UUID.randomUUID().toString())))
     }
     fun colorizeUpdate(actor: String,p: JSONObject): JSONObject = locked {
@@ -1643,28 +1691,29 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         }
         val state=snap.getJSONObject("state");val mask=ArtColorize.layer(state,p.getString("maskId"))
         require(!mask.getBoolean("locked") && mask.getBoolean("visible")) {"蒙版已锁定或隐藏"}
-        ArtColorize.root(mask)
+        ArtPixelCoordinates.inverse(state,mask)
         val source=ArtColorize.source(state,mask.getJSONObject("colorize").getString("sourceLayerId"))
-        val view=ArtMenuOperations.isolated(snap,setOf(source.getString("id")),source.getString("id"))
+        val view=snap
         // The full render and a conservative solver reservation coexist; do not estimate them independently.
-        val bitmap=ArtRenderer.render(this,view)
+        val bitmap=selectionReference(snap,JSONObject().put("layerId",source.getString("id")).put("reference","current"),0)
         val result=try {
-            val area=ArtColorizeSolver.region(state,bitmap,mask)
-            ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this,view.getJSONObject("state"),
-                state.getInt("width"),state.getInt("height"))+ArtColorizeSolver.workingBytes(mask,area.width().toLong()*area.height()),"上色蒙版更新")
-            ArtColorizeSolver.solve(state,bitmap,mask,area)
+            val solverMask=JSONObject(mask.toString()).put("solverToDocument",ArtShapes.encode(ArtShapes.layerMatrix(state,mask)))
+            val area=ArtColorizeSolver.region(state,bitmap,solverMask)
+            ArtImagePolicy.requireBytes(state.getInt("width").toLong()*state.getInt("height")*8+ArtColorizeMultiscale.estimate(mask,area.width().toLong()*area.height()),"上色蒙版更新")
+            ArtColorizeMultiscale.solve(state,bitmap,solverMask,area)
         } finally {bitmap.recycle()}
         val outputWidth=result.bitmap.width;val outputHeight=result.bitmap.height
-        val png=try {ArtImagePolicy.encodePng(result.bitmap,MAX_ASSET_BYTES)} finally {result.bitmap.recycle()}
+        val png=try {ArtImagePolicy.encodeAsset(result.bitmap,MAX_ASSET_BYTES)} finally {result.bitmap.recycle()}
         val asset=UUID.randomUUID().toString()
         try {
             atomicBytes(assetFile(asset),png)
             val params=JSONObject(p.toString()).put("generation",mask.getJSONObject("colorize").getInt("generation"))
                 .put("sourceSignature",ArtColorize.signature(state,source))
                 .put("output",JSONObject().put("asset",asset).put("x",result.x).put("y",result.y)
-                    .put("width",outputWidth).put("height",outputHeight))
+                    .put("width",outputWidth).put("height",outputHeight).put("documentToLayer",ArtShapes.encode(ArtPixelCoordinates.inverse(state,mask))))
             apply(actor,"COLORIZE_OUTPUT",params).put("colorizeResult",JSONObject().put("filledPixels",result.filled)
-                .put("seedPixels",result.seeds).put("algorithm","prefiltered-seeded-geodesic-fill")
+                .put("seedPixels",result.seeds).put("coarseScale",result.scale).put("statisticsIncludeTileOverlap",result.scale>1)
+                .put("algorithm",if(result.scale>1)"multiscale-tiled-geodesic-fill" else "prefiltered-seeded-geodesic-fill")
                 .put("cleanedPixels",result.cleanup.pixels).put("cleanedSeedPixels",result.cleanup.seedPixels)
                 .put("cleanedRegions",result.cleanup.regions)
                 .put("settings",ArtColorize.normalizeSettings(mask.getJSONObject("colorize").getJSONObject("settings"),JSONObject())))
@@ -1872,13 +1921,12 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         val name=p.optString("name",if(kind=="tip")"图像笔尖" else "图像纹理").trim();require(name.length in 1..64)
         val encoded=p.getString("base64");require(encoded.length<=12*1024*1024)
         val bytes=Base64.decode(encoded,Base64.DEFAULT);require(bytes.isNotEmpty() && bytes.size<=8*1024*1024)
-        val bounds=BitmapFactory.Options().apply {inJustDecodeBounds=true}
-        BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
+        val bounds=ArtImagePolicy.bounds(bytes)
         require(bounds.outWidth in 1..512 && bounds.outHeight in 1..512) {"笔刷图像边长须为1–512像素"}
         val id=UUID.randomUUID().toString();val list=readBrushList(brushResourceFile());require(list.length()<128) {"笔刷图像最多128个"}
         ArtImagePolicy.requireBytes(bounds.outWidth.toLong()*bounds.outHeight*32+bytes.size,"导入笔刷图像")
-        val image=BitmapFactory.decodeByteArray(bytes,0,bytes.size,BitmapFactory.Options().apply {inScaled=false;inPreferredConfig=Bitmap.Config.ARGB_8888}) ?: error("无法解码笔刷图像")
-        try {atomicBytes(assetFile(id),ArtImagePolicy.encodePng(image,MAX_ASSET_BYTES))}
+        val image=ArtImagePolicy.decode(bytes).first
+        try {atomicBytes(assetFile(id),ArtImagePolicy.encodeAsset(image,MAX_ASSET_BYTES))}
         finally {image.recycle()}
         val item=JSONObject().put("id",id).put("asset",id).put("name",name).put("kind",kind)
             .put("width",bounds.outWidth).put("height",bounds.outHeight)
@@ -1894,8 +1942,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                 normalized=if(tool in ArtFigure.tools)ArtFigure.geometry(normalized.put("tool",tool)) else ArtRasterPath.normalize(normalized.put("tool",tool))
                 ArtFigure.assetIds(normalized).forEach {id ->
                     val file=assetFile(id);require(file.isFile) {"图案图片资源不存在"}
-                    val bounds=BitmapFactory.Options().apply {inJustDecodeBounds=true}
-                    BitmapFactory.decodeFile(file.absolutePath,bounds)
+                    val bounds=ArtImagePolicy.bounds(file)
                     require(bounds.outWidth in 1..512 && bounds.outHeight in 1..512) {"图案图片边长须为1–512像素，请用brush.resource.import导入"}
                 }
             }
@@ -2520,7 +2567,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         // Preflight throws a confirmation request before creating IDs, files or changing the pointer.
         val (bitmap, metadata) = ArtImagePolicy.decode(imageBytes(encoded), confirmResize)
         val width = bitmap.width; val height = bitmap.height
-        val png = try { ArtImagePolicy.encodePng(bitmap, MAX_ASSET_BYTES) } finally { bitmap.recycle() }
+        val png = try { ArtImagePolicy.encodeAsset(bitmap, MAX_ASSET_BYTES) } finally { bitmap.recycle() }
         val id = UUID.randomUUID().toString()
         val asset = UUID.randomUUID().toString()
         val layer = newLayer(UUID.randomUUID().toString(), "image", "图像图层", "", asset)
@@ -2551,7 +2598,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             ArtImagePolicy.renderBytes(this, state, state.getInt("width"), state.getInt("height")))
         val width = bitmap.width; val height = bitmap.height
         val id = UUID.randomUUID().toString()
-        val png = try { ArtImagePolicy.encodePng(bitmap, MAX_ASSET_BYTES) } finally { bitmap.recycle() }
+        val png = try { ArtImagePolicy.encodeAsset(bitmap, MAX_ASSET_BYTES) } finally { bitmap.recycle() }
         atomicBytes(assetFile(id), png)
         val doc = loadCurrent()
         val op = JSONObject().put("id", UUID.randomUUID().toString()).put("actor", actor)
@@ -2632,7 +2679,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         val bitmap = ArtText.render(text, ArtImagePolicy.renderBytes(this, state,
             state.getInt("width"), state.getInt("height")))
         val asset = UUID.randomUUID().toString()
-        val bytes = try { ArtImagePolicy.encodePng(bitmap, MAX_ASSET_BYTES) } finally { bitmap.recycle() }
+        val bytes = try { ArtImagePolicy.encodeAsset(bitmap, MAX_ASSET_BYTES) } finally { bitmap.recycle() }
         atomicBytes(assetFile(asset), bytes)
         try {
             val result = appendToCurrent(actor, if (update) "TEXT_UPDATE" else "TEXT_CREATE",
@@ -2729,6 +2776,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         ArtReferences.validate(state)
         ArtAssistants.validate(state)
         ArtColorize.validate(state)
+        ArtSelectionMasks.validate(state)
         state.optJSONObject("selection")?.let {ArtSelection.validate(it)}
         state.optJSONObject("previousSelection")?.let {ArtSelection.validate(it)}
         return state
@@ -2841,7 +2889,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             "PIXEL_REPAIR" -> {
                 val layer=find(p.getString("layerId")).second
                 require(layer.getString("kind") in setOf("paint","image") && !lockedByParent(layer,layers))
-                require(layer.optString("parentId").isBlank() &&
+                if(p.has("documentToLayer"))ArtPixelCoordinates.validate(p) else require(layer.optString("parentId").isBlank() &&
                     layer.getDouble("x")==0.0 && layer.getDouble("y")==0.0 &&
                     layer.getDouble("scale")==1.0 && layer.getDouble("rotation")==0.0 && !layer.has("affine"))
                 val x=p.getInt("x");val y=p.getInt("y");val w=p.getInt("width");val h=p.getInt("height")
@@ -2850,14 +2898,14 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                 val order=contentOrder(layer)
                 for(key in listOf("erase","patch")) {
                     val asset=p.getJSONObject(key).getString("asset");validateId(asset)
-                    order.put(JSONObject().put("kind",if(key=="erase")"erase" else "paste")
-                        .put("asset",asset).put("x",x).put("y",y))
+                    order.put(ArtPixelCoordinates.copy(JSONObject().put("kind",if(key=="erase")"erase" else "paste")
+                        .put("asset",asset).put("x",x).put("y",y),p))
                 }
             }
             "PIXEL_EDIT", "PIXEL_PASTE" -> {
                 val layer = find(p.getString("layerId")).second
                 require(layer.getString("kind") in setOf("paint", "image") && !lockedByParent(layer, layers))
-                require(layer.optString("parentId").isBlank() &&
+                if(p.has("documentToLayer"))ArtPixelCoordinates.validate(p) else require(layer.optString("parentId").isBlank() &&
                     layer.getDouble("x") == 0.0 && layer.getDouble("y") == 0.0 &&
                     layer.getDouble("scale") == 1.0 && layer.getDouble("rotation") == 0.0 && !layer.has("affine")) {
                     "请先取消图层变换和分组，再编辑选区像素"
@@ -2873,8 +2921,8 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                     val kind = if (p.optString("action") in setOf("FILL_CONTIGUOUS_ERASE","ENCLOSE_ERASE")) "erase" else "paste"
                     val blend=ArtPixelBlend.validate(p.optString("blend","normal"))
                     require(kind!="erase" || blend=="normal") {"擦除记录不能使用颜色混合模式"}
-                    order.put(JSONObject().put("kind", kind).put("asset", p.getString("asset"))
-                        .put("blend",blend).put("x", p.getInt("x")).put("y", p.getInt("y")))
+                    order.put(ArtPixelCoordinates.copy(JSONObject().put("kind", kind).put("asset", p.getString("asset"))
+                        .put("blend",blend).put("x", p.getInt("x")).put("y", p.getInt("y")),p))
                 } else {
                     val x = p.getInt("x"); val y = p.getInt("y")
                     val width = p.getInt("width"); val height = p.getInt("height")
@@ -3208,6 +3256,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                     layer.put(field, value)
                 }
             }
+            "SELECTION_MASK" -> ArtSelectionMasks.edit(state,p)
             "SELECTION_TOOL", "SELECTION_BEZIER" -> {
                 val selected=p.getJSONObject("selection");ArtSelection.validate(selected)
                 state.put("selection",JSONObject(selected.toString()))
@@ -3632,7 +3681,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             state.getInt("width"), state.getInt("height")) + area[2].toLong() * area[3] * 8, "复制选区")
         val bitmap = ArtRenderer.render(this, view)
         val bytes = try {
-            val clipped = Bitmap.createBitmap(area[2], area[3], Bitmap.Config.ARGB_8888)
+            val clipped = ArtFloatPixels.bitmap(area[2], area[3])
             try {
                 Canvas(clipped).drawBitmap(bitmap, -area[0].toFloat(), -area[1].toFloat(), Paint())
                 state.optJSONObject("selection")?.takeIf {it.has("coverage")}?.let {
@@ -3662,10 +3711,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                         }
                     } finally { mask.recycle() }
                 }
-                ByteArrayOutputStream().use { stream ->
-                    require(clipped.compress(Bitmap.CompressFormat.PNG, 100, stream))
-                    stream.toByteArray()
-                }
+                ArtImagePolicy.encodeAsset(clipped,8*1024*1024)
             } finally { clipped.recycle() }
         } finally { bitmap.recycle() }
         require(bytes.size <= 8 * 1024 * 1024) { "选区图片超过 8 MB" }
@@ -3724,11 +3770,13 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         val doc=loadCurrent()
         require(p.getString("documentId")==doc.getString("id")) {"工程已切换，请重新围合"}
         require(p.getInt("expectedRevision")==doc.getJSONArray("operations").length()) {"工程已更新，请重新围合"}
-        val state=replay(doc);val layer=editableLayer(state);ArtEncloseFill.target(layer)
+        val state=replay(doc);val layer=ArtPixelCoordinates.target(state,p.getString("layerId"));ArtEncloseFill.target(layer)
         require(p.getString("layerId")==layer.getString("id")) {"目标图层已改变，请重新围合"}
         val settings=ArtEncloseFill.options(p)
-        val color=if(settings.getBoolean("erase"))Color.WHITE else Color.parseColor(p.getString("color").also {requireColor(it)})
-        require(settings.getBoolean("erase") || settings.getString("fillType")=="pattern" || Color.alpha(color)>0) {"填充色不能完全透明，请使用擦除模式"}
+        val color=if(settings.getBoolean("erase"))Color.WHITE else if(p.has("linearRGBA"))ArtFloatPixels.preview(ArtFloatPixels.color(p.getJSONArray("linearRGBA")))
+            else Color.parseColor(p.getString("color").also {requireColor(it)})
+        require(settings.getBoolean("erase") || settings.getString("fillType")=="pattern" ||
+            if(p.has("linearRGBA"))p.getJSONArray("linearRGBA").getDouble(3)>0 else Color.alpha(color)>0) {"填充色不能完全透明，请使用擦除模式"}
         val request=ArtEncloseFill.geometry(p,settings).put("layerId",layer.getString("id"))
         val points=if(request.has("points"))ArtEncloseFill.points(request.getJSONArray("points")) else emptyList()
         val area=ArtEncloseFill.area(state,request,points)
@@ -3737,7 +3785,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         try {
             val result=ArtEncloseFill.solve(state,source,request,area,color) {id->resources.getOrPut(id) {
                 val file=assetFile(id);require(file.isFile) {"图案图片资源不存在"}
-                val size=BitmapFactory.Options().apply {inJustDecodeBounds=true};BitmapFactory.decodeFile(file.absolutePath,size)
+                val size=ArtImagePolicy.bounds(file)
                 require(size.outWidth in 1..512 && size.outHeight in 1..512) {"图案图片边长须为1–512像素，请用brush.resource.import导入"}
                 ArtImagePolicy.decodeAsset(file)
             }}
@@ -3745,7 +3793,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             val receipt=JSONObject().put("filledPixels",result.pixels).put("selectedRegions",result.regions)
                 .put("algorithm","shared-soft-enclose-v2").put("reference",settings.getString("reference")).put("blend",settings.getString("blend"))
             if(result.pixels==0)return@locked snapshot(doc).put("encloseResult",receipt.put("changed",false).put("message","没有符合条件的可写入区域"))
-            val bytes=ArtImagePolicy.encodePng(result.bitmap,MAX_ASSET_BYTES);val asset=UUID.randomUUID().toString()
+            val bytes=ArtImagePolicy.encodeAsset(result.bitmap,MAX_ASSET_BYTES);val asset=UUID.randomUUID().toString()
             try {
                 atomicBytes(assetFile(asset),bytes)
                 val params=JSONObject().put("asset",asset).put("layerId",layer.getString("id"))
@@ -3754,6 +3802,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                     .put("settings",settings).put("blend",settings.getString("blend"))
                     .put("filledPixels",result.pixels).put("algorithm","shared-soft-enclose-v2")
                 val geometry=if(request.has("nodes"))"nodes" else "points";params.put(geometry,request.getJSONArray(geometry))
+                ArtPixelCoordinates.stamp(params,state,layer)
                 appendToCurrent(actor,"PIXEL_PASTE",params).put("encloseResult",receipt.put("changed",true))
             } catch(error:Throwable) {assetFile(asset).delete();throw error}
         } finally {source.recycle();overlay?.recycle();resources.values.forEach {it.recycle()}}
@@ -3765,20 +3814,16 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         val doc=loadCurrent()
         require(p.getString("documentId")==doc.getString("id")) { "工程已切换，请重新涂抹修补区域" }
         require(p.getInt("expectedRevision")==doc.getJSONArray("operations").length()) { "工程版本已更新，请重新涂抹修补区域" }
-        val state=replay(doc);val layer=editableLayer(state)
+        val state=replay(doc);val layer=ArtPixelCoordinates.target(state,p.getString("layerId"))
         require(p.getString("layerId")==layer.getString("id")) { "当前图层已改变，请重新选择修补目标" }
         val mask=ArtSmartPatch.mask(state,p)
-        val view=ArtMenuOperations.isolated(snapshot(doc),setOf(layer.getString("id")),layer.getString("id"))
-        val viewState=view.getJSONObject("state");viewState.put("background","#00000000")
-        ArtMenuOperations.layers(viewState).first { it.getString("id")==layer.getString("id") }
-            .put("visible",true).put("opacity",1.0).put("blend","normal")
-        ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this,viewState,state.getInt("width"),state.getInt("height"))+
-            ArtSmartPatch.workingBytes(mask.width,mask.height),"智能修补")
-        val source=ArtRenderer.render(this,view)
+        val request=JSONObject(p.toString()).put("reference",p.optString("reference","current"))
+            .put("colorLabels",p.optJSONArray("colorLabels") ?: JSONArray().put(1))
+        val source=selectionReference(snapshot(doc),request,ArtSmartPatch.workingBytes(mask.width,mask.height))
         val result=try { ArtSmartPatch.repair(source,mask,state.optJSONObject("selection")) } finally { source.recycle() }
         val patchBytes: ByteArray;val eraseBytes: ByteArray
         try {
-            patchBytes=ArtImagePolicy.encodePng(result.patch,MAX_ASSET_BYTES)
+            patchBytes=ArtImagePolicy.encodeAsset(result.patch,MAX_ASSET_BYTES)
             eraseBytes=ArtImagePolicy.encodePng(result.erase,MAX_ASSET_BYTES)
         } finally { result.patch.recycle();result.erase.recycle() }
         val patchId=UUID.randomUUID().toString();val eraseId=UUID.randomUUID().toString()
@@ -3792,6 +3837,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                 .put("comparisons",result.work).put("levels",ArtSmartPatch.levelReports(result.levels))
                 .put("settings",JSONObject(p.toString())
                     .apply { remove("points");remove("documentId");remove("expectedRevision");remove("layerId") })
+            ArtPixelCoordinates.stamp(params,state,layer)
             appendToCurrent(actor,"PIXEL_REPAIR",params).put("repair",JSONObject()
                 .put("maskPixels",result.pixels).put("comparisons",result.work).put("algorithm","multiscale-patchmatch")
                 .put("levels",ArtSmartPatch.levelReports(result.levels)).put("nativeOutput",true))
@@ -3830,14 +3876,14 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             val mask=ArtContiguousFill.crop(rawMask)
             overlay=ArtContiguousFill.paint(mask,o) {id->resources.getOrPut(id) {
                 val file=assetFile(id);require(file.isFile) {"图案图片资源不存在"}
-                val size=BitmapFactory.Options().apply {inJustDecodeBounds=true};BitmapFactory.decodeFile(file.absolutePath,size)
+                val size=ArtImagePolicy.bounds(file)
                 require(size.outWidth in 1..512 && size.outHeight in 1..512) {"图案图片边长须为1–512像素，请用brush.resource.import导入"}
                 ArtImagePolicy.decodeAsset(file)
             }}
             val bitmap=requireNotNull(overlay);val row=IntArray(bitmap.width);var painted=0
             for(y in 0 until bitmap.height) {bitmap.getPixels(row,0,bitmap.width,0,y,bitmap.width,1);painted+=row.count {Color.alpha(it)>0}}
             if(painted==0)return@locked snapshot(doc).put("changed",false).put("message","图案或透明度没有可写入的像素")
-            val bytes=ArtImagePolicy.encodePng(bitmap,MAX_ASSET_BYTES);val asset=UUID.randomUUID().toString()
+            val bytes=ArtImagePolicy.encodeAsset(bitmap,MAX_ASSET_BYTES);val asset=UUID.randomUUID().toString()
             try {
                 atomicBytes(assetFile(asset),bytes)
                 val params=JSONObject().put("asset",asset).put("layerId",layer.getString("id"))

@@ -70,15 +70,19 @@ internal object ArtContiguousFill {
         require(r.contains(seeds.first().first,seeds.first().second)) {"首点需在查找范围内"}
         val selected=state.optJSONObject("selection");val sampler=selected?.let {ArtSoftSelection.Sampler(it)}
         require(sampler==null || sampler.at(seeds.first().first+0.5,seeds.first().second+0.5)>0) {"首点需在现有选区内"}
-        val initial=source.getPixel(seeds.first().first,seeds.first().second);val groups=linkedMapOf<Int,MutableList<Pair<Int,Int>>>()
+        val reference=ArtFloatPixels.read(source,r)
+        fun index(seed:Pair<Int,Int>)=((seed.second-r.top)*r.width()+seed.first-r.left)*4
+        val initialIndex=index(seeds.first());val initial=ArtFloatPixels.preview(reference,initialIndex)
+        val groups=linkedMapOf<List<Int>,MutableList<Pair<Int,Int>>>()
         val boundary=p.getString("fillMode")=="boundary";val threshold=p.getInt("tolerance")*255/100
+        val boundaryColor=ArtFloatPixels.color(Color.parseColor(p.getString("boundaryColor")))
         for(seed in seeds) {
             if(!r.contains(seed.first,seed.second))continue
             if(sampler!=null && sampler.at(seed.first+0.5,seed.second+0.5)==0)continue
-            val color=source.getPixel(seed.first,seed.second)
-            if(p.getString("dragMode")=="similar" && ArtColorSelection.difference(color,initial)!=0)continue
-            if(boundary && ArtColorSelection.difference(color,Color.parseColor(p.getString("boundaryColor")))<=threshold && p.getInt("opacitySpread")==100)continue
-            val a=Color.alpha(color);val key=if(boundary)0 else Color.argb(a,Color.red(color)*a/255,Color.green(color)*a/255,Color.blue(color)*a/255)
+            val i=index(seed)
+            if(p.getString("dragMode")=="similar" && ArtFloatPixels.difference(reference,i,reference,initialIndex)!=0)continue
+            if(boundary && ArtFloatPixels.difference(reference,i,boundaryColor)<=threshold && p.getInt("opacitySpread")==100)continue
+            val key=if(boundary)emptyList() else (0..3).map {reference[i+it].toRawBits()}
             groups.getOrPut(key) {mutableListOf()}.add(seed)
         }
         ArtImagePolicy.requireBytes(r.width().toLong()*r.height()*64,"连续填充与软蒙版")
@@ -92,7 +96,7 @@ internal object ArtContiguousFill {
             val mask=ArtColorSelection.mask(state,source,request,p.getString("fillMode")!="similar",pending,applyEffects=false,gapLimit=32)
             for(i in union.indices)union[i]=maxOf(union[i].toInt() and 255,mask.alpha[i].toInt() and 255).toByte()
         }
-        val result=ArtColorSelection.finish(state,source,ArtColorSelection.Mask(union,r,initial),request,32)
+        val result=ArtColorSelection.finish(state,source,ArtColorSelection.Mask(union,r,initial),request,32,reference)
         if(sampler!=null)for(i in result.alpha.indices)result.alpha[i]=minOf(result.alpha[i].toInt() and 255,sampler.at(r.left+i%r.width()+0.5,r.top+i/r.width()+0.5)).toByte()
         return result
     }
@@ -106,17 +110,17 @@ internal object ArtContiguousFill {
         return ArtColorSelection.Mask(alpha,Rect(r.left+left,r.top+top,r.left+right,r.top+bottom),mask.sampled)
     }
     fun paint(mask:ArtColorSelection.Mask,p:JSONObject,resources:((String)->Bitmap)?):Bitmap {
-        val r=mask.bounds;val bitmap=Bitmap.createBitmap(r.width(),r.height(),Bitmap.Config.ARGB_8888)
+        val r=mask.bounds;val bitmap=ArtFloatPixels.bitmap(r.width(),r.height())
         try {
             val canvas=Canvas(bitmap);canvas.translate(-r.left.toFloat(),-r.top.toFloat());val opacity=(p.getDouble("opacity")*255).roundToInt()
             if(p.getString("fillType")=="pattern")ArtPatternRenderer.withPaint(p.getJSONObject("pattern"),resources) {paint->paint.alpha=opacity;canvas.drawRect(RectF(r),paint)}
-            else canvas.drawRect(RectF(r),Paint().apply {color=if(p.getBoolean("erase"))Color.WHITE else Color.parseColor(p.getString("color"));alpha=(Color.alpha(color)*p.getDouble("opacity")).roundToInt()})
-            val row=IntArray(r.width())
-            for(y in 0 until r.height()) {bitmap.getPixels(row,0,r.width(),0,y,r.width(),1)
-                for(x in row.indices) {val c=row[x];val alpha=(Color.alpha(c)*(mask.alpha[y*r.width()+x].toInt() and 255)+127)/255
-                    row[x]=(c and 0x00ffffff) or (alpha shl 24)}
-                bitmap.setPixels(row,0,r.width(),0,y,r.width(),1)
-            }
+            val pixels=if(p.getString("fillType")=="solid") {
+                val color=if(p.getBoolean("erase"))floatArrayOf(1f,1f,1f,1f) else if(p.has("linearRGBA"))ArtFloatPixels.color(p.getJSONArray("linearRGBA")) else ArtFloatPixels.color(Color.parseColor(p.getString("color")))
+                FloatArray(r.width()*r.height()*4) {color[it%4]*p.getDouble("opacity").toFloat()}
+            } else ArtFloatPixels.read(bitmap)
+            for(i in mask.alpha.indices) {val amount=(mask.alpha[i].toInt() and 255)/255f
+                for(c in 0..3)pixels[i*4+c]*=amount}
+            ArtFloatPixels.write(bitmap,pixels)
             return bitmap
         } catch(error:Throwable) {bitmap.recycle();throw error}
     }

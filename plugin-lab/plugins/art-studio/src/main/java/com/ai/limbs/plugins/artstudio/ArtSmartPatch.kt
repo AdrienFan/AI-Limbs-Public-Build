@@ -16,29 +16,29 @@ internal object ArtSmartPatch {
     const val MAX_MASK_PIXELS = 1048576
     const val MAX_REGION_PIXELS = 8388608
     const val MAX_WORK = ArtPatchPyramid.MAX_WORK
-    val pending = listOf("跨图层取样", "变换或分组图层", "HDR 高位深")
+    val pending = emptyList<String>()
     data class Options(val width: Float, val radius: Int, val accuracy: Int, val search: Int, val feather: Int, val levels: Int, val refinementStep: Int, val seed: Int)
     data class Mask(val left: Int, val top: Int, val width: Int, val height: Int,
         val selected: BooleanArray, val options: Options)
     data class Result(val patch: Bitmap, val erase: Bitmap, val pixels: Int, val work: Long, val levels: List<ArtPatchPyramid.Level>)
     // Pyramid images, two adjacent fields, integral/wavefront data, voting and output bitmaps coexist.
-    fun workingBytes(w:Int,h:Int):Long=w.toLong()*h*96+(w.toLong()+1)*(h+1)*4
+    fun workingBytes(w:Int,h:Int):Long=w.toLong()*h*192+(w.toLong()+1)*(h+1)*4
     fun levelReports(levels:List<ArtPatchPyramid.Level>)=JSONArray(levels.map {level->JSONObject()
         .put("width",level.width).put("height",level.height).put("scale",level.scale).put("maskPixels",level.maskPixels)
         .put("refinementStep",level.refinementStep).put("refinementCenters",level.centers)})
     fun info(): JSONObject = JSONObject().put("algorithm","multiscale-patchmatch")
-        .put("coordinateSpace","document").put("target","current untransformed visible root paint/image layer")
+        .put("coordinateSpace","document").put("target","current visible unlocked paint/image layer including group/affine transforms; current/visible/labels reference")
         .put("maxPoints",MAX_POINTS).put("maxMaskPixels",MAX_MASK_PIXELS)
         .put("maxRegionPixels",MAX_REGION_PIXELS).put("maxComparisonsAndVotes",MAX_WORK).put("maxComparisons",MAX_WORK)
         .put("maxLevels",ArtPatchPyramid.MAX_LEVELS).put("nativeOutput",true)
-        .put("localBytesPerPixel",100).put("workingBudgetBytes",ArtImagePolicy.budgetBytes())
+        .put("localBytesPerPixel",196).put("workingBudgetBytes",ArtImagePolicy.budgetBytes())
         .put("planning","levels=0 plans depth from mask and clean donor geometry; refinementStep=0 sets each level spacing from area and accuracy. Large repairs use sparse refinement and dense native donor voting. Budget failures do not write assets or history.")
         .put("pending",JSONArray(pending)).put("ranges",JSONObject()
             .put("width",JSONArray().put(1).put(256)).put("patchRadius",JSONArray().put(1).put(8))
             .put("accuracy",JSONArray().put(1).put(100)).put("searchRadius",JSONArray().put(16).put(1024))
             .put("feather",JSONArray().put(0).put(8)).put("levels",JSONArray().put(0).put(6))
             .put("refinementStep",JSONArray().put(0).put(64)).put("seed",JSONArray().put(0).put(Int.MAX_VALUE)))
-        .put("defaults",JSONObject().put("width",32)
+        .put("defaults",JSONObject().put("reference","current").put("colorLabels",JSONArray().put(1)).put("width",32)
             .put("patchRadius",4).put("accuracy",40).put("searchRadius",64).put("feather",2)
             .put("levels",0).put("refinementStep",0).put("seed",0))
     fun options(p: JSONObject): Options {
@@ -117,9 +117,9 @@ internal object ArtSmartPatch {
     fun repair(source: Bitmap,mask: Mask,selection:JSONObject?=null): Result {
         val coverage=selection?.takeIf {it.has("coverage")}?.let {ArtSoftSelection.Sampler(it)}
         val w=mask.width;val h=mask.height;val size=w*h;val hole=mask.selected;val o=mask.options
-        val original=IntArray(size);source.getPixels(original,0,w,mask.left,mask.top,w,h)
+        val original=ArtFloatPixels.read(source,android.graphics.Rect(mask.left,mask.top,mask.left+w,mask.top+h))
         ArtImagePolicy.requireBytes(workingBytes(w,h),"多尺度智能修补")
-        val repaired=ArtPatchPyramid.repair(original,hole,w,h,o.radius,o.search,o.accuracy,o.levels,o.refinementStep,o.seed)
+        val repaired=ArtFloatPatchPyramid.repair(original,hole,w,h,o.radius,o.search,o.accuracy,o.levels,o.refinementStep,o.seed)
         val holes=IntArray(hole.count {it});var index=0
         for(i in hole.indices)if(hole[i])holes[index++]=i
         val queue=IntArray(size);var head=0;var tail=0
@@ -136,19 +136,19 @@ internal object ArtSmartPatch {
             fun visit(n: Int) { if(hole[n] && depth[n]<0) { depth[n]=depth[i]+1;queue[tail++]=n } }
             if(x>0)visit(i-1);if(x+1<w)visit(i+1);if(y>0)visit(i-w);if(y+1<h)visit(i+w)
         }
-        val output=IntArray(size);val erasure=IntArray(size)
+        val output=FloatArray(size*4);val erasure=IntArray(size)
         for(i in holes) {
             val mix=if(o.feather==0)1.0 else (depth[i].toDouble()/(o.feather+1)).coerceAtMost(1.0)
-            output[i]=ArtSoftSelection.blend(original[i],repaired.pixels[i],(mix*255).roundToInt().coerceIn(0,255))
             val amount=coverage?.at(mask.left+i%w+0.5,mask.top+i/w+0.5) ?: 255
-            if(amount==0)output[i]=0 else {
-                output[i]=ArtSoftSelection.blend(original[i],output[i],amount)
+            if(amount>0) {
+                val blend=(mix*amount/255).toFloat()
+                for(c in 0..3)output[i*4+c]=original[i*4+c]*(1-blend)+repaired.pixels[i*4+c]*blend
                 erasure[i]=Color.WHITE
             }
         }
-        val patch=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888)
+        val patch=ArtFloatPixels.bitmap(w,h)
         try {
-            patch.setPixels(output,0,w,0,0,w,h)
+            ArtFloatPixels.write(patch,output)
             val erase=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888)
             try {erase.setPixels(erasure,0,w,0,0,w,h)
                 return Result(patch,erase,holes.size,repaired.work,repaired.levels)}

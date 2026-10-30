@@ -298,7 +298,11 @@
       "plugin.art.studio.document.snapshot.read",
       "plugin.art.studio.document.operation.status",
       "plugin.art.studio.animation.pose.read",
-      "plugin.art.studio.animation.poses.apply"
+      "plugin.art.studio.animation.poses.apply",
+      "plugin.art.studio.selection.rotate",
+      "plugin.art.studio.selection.mask",
+      "plugin.art.studio.comic.presets",
+      "plugin.art.studio.image.sample_linear"
     ],
     "services": [],
     "providers": [

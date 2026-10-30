@@ -2098,8 +2098,8 @@ internal object ArtStudioMenuCatalog {
             "cut_selection_to_new_layer" -> result(state.optJSONObject("selection")!=null && ArtMenuOperations.pixelsEditable(state),"请选择可编辑根像素图层并创建选区")
             "copy_selection_to_new_layer" -> result(state.optJSONObject("selection")!=null && hasLayer && root && selected!!.getString("kind") in setOf("paint","image") && selected.getBoolean("visible"),"请选择可见根像素图层并创建选区")
             "save_groups_as_images" -> result(ArtMenuOperations.layers(state).any { it.getString("kind")=="group" && it.optString("parentId").isBlank() },"尚无根图层组")
-            "add_new_colorize_mask" -> result(hasLayer && selected!!.getString("kind") in setOf("paint","image") &&
-                selected.getBoolean("visible") && ArtColorize.rooted(selected),"请选择可见、未变换的根绘画或图像线稿")
+            "add_new_colorize_mask" -> result(hasLayer && selected!!.getString("kind") in setOf("paint","image","group") &&
+                ArtMove.visibility(state,selected)>0,"请选择可见绘画、图像或线稿组；支持图层及父组变换")
             "duplicatelayer" -> result(hasLayer,"请先选择图层")
             "add_new_paint_layer","add_new_group_layer" -> result(!hasLayer || unlocked,"当前父图层已锁定")
             "deselect","selectionscale","edit_selection" -> result(state.optJSONObject("selection")!=null,"请先创建选区")

@@ -26,7 +26,7 @@ internal object ArtFigure {
         if(mode=="none") {require(!p.has("color")&&!p.has("pattern"));return out}
         if(mode=="solid") {require(!p.has("pattern"));return out.put("color",color(p.optString("color",foreground)))}
         require(!p.has("color"));val pattern=if(p.has("pattern"))p.getJSONObject("pattern") else JSONObject()
-        require(pattern.keys().asSequence().all {it in setOf("kind","foreground","background","tileSize","scale","angle","offset","asset")})
+        require(pattern.keys().asSequence().all {it in setOf("kind","foreground","background","tileSize","scale","angle","offset","asset","foregroundLinearRGBA","backgroundLinearRGBA")})
         val kind=pattern.optString("kind","checker");require(kind in patterns)
         val scale=(if(pattern.has("scale"))pattern.getDouble("scale") else 1.0);require(scale.isFinite()&&scale in 0.1..16.0)
         val angle=(if(pattern.has("angle"))pattern.getDouble("angle") else 0.0);require(angle.isFinite()&&angle in -360.0..360.0)
@@ -36,6 +36,7 @@ internal object ArtFigure {
         val config=JSONObject().put("kind",kind).put("scale",scale).put("angle",angle).put("offset",JSONArray(offset.toString()))
             .put("tileSize",tile.toInt()).put("foreground",color(pattern.optString("foreground",foreground)))
             .put("background",color(pattern.optString("background","#00000000")))
+        for(key in listOf("foregroundLinearRGBA","backgroundLinearRGBA"))if(pattern.has(key)) {ArtFloatPixels.color(pattern.getJSONArray(key));config.put(key,pattern.getJSONArray(key))}
         if(kind=="image") {val id=pattern.getString("asset");require(id.matches(Regex("[a-f0-9-]{36}")));config.put("asset",id)}
         else require(!pattern.has("asset")) {"仅图片平铺使用asset"}
         return out.put("pattern",config)

@@ -26,19 +26,36 @@ internal object ArtTransformPixels {
         if(a<=0)return Color.TRANSPARENT
         return Color.argb(a.roundToInt().coerceIn(0,255),(r/a).roundToInt().coerceIn(0,255),(g/a).roundToInt().coerceIn(0,255),(b/a).roundToInt().coerceIn(0,255))
     }
+    fun sampleFloat(data:FloatArray,w:Int,h:Int,x:Double,y:Double,filter:String,out:FloatArray,index:Int) {
+        require(filter in ArtTransform.filters && data.size==w*h*4)
+        for(c in 0..3)out[index+c]=0f
+        if(filter=="nearest") {
+            val ix=floor(x).toInt();val iy=floor(y).toInt()
+            if(ix in 0 until w && iy in 0 until h)for(c in 0..3)out[index+c]=data[(iy*w+ix)*4+c]
+            return
+        }
+        val xx=x-.5;val yy=y-.5;val ix=floor(xx).toInt();val iy=floor(yy).toInt()
+        val taps=if(filter=="bicubic")-1..2 else 0..1
+        for(j in taps)for(i in taps) {
+            if(ix+i !in 0 until w || iy+j !in 0 until h)continue
+            val weight=if(filter=="bicubic")kernel(xx-ix-i)*kernel(yy-iy-j) else
+                (if(i==0)1-(xx-ix) else xx-ix)*(if(j==0)1-(yy-iy) else yy-iy)
+            for(c in 0..3)out[index+c]+=(data[((iy+j)*w+ix+i)*4+c]*weight).toFloat()
+        }
+        out[index+3]=out[index+3].coerceIn(0f,1f)
+    }
     fun render(capture:ArtMovePixels.Capture,plan:ArtTransform.Plan,p:JSONObject):Result {
         val src=capture.bounds;val dst=plan.bounds;val w=src.width();val h=src.height();val ow=dst.width();val oh=dst.height()
         ArtImagePolicy.requireBytes(w.toLong()*h*24+ow.toLong()*oh*24,"变换插值与选区覆盖")
-        val image=BitmapFactory.decodeByteArray(capture.bytes,0,capture.bytes.size) ?: error("变换源PNG无效")
-        val input=IntArray(w*h)
-        try {require(image.width==w&&image.height==h);image.getPixels(input,0,w,0,0,w,h)} finally {image.recycle()}
+        val image=ArtImagePolicy.decodeAssetBytes(capture.bytes)
+        val input=try {require(image.width==w&&image.height==h);ArtFloatPixels.read(image)} finally {image.recycle()}
         val sampler=ArtSoftSelection.Sampler(capture.mask)
         val maskInput=IntArray(w*h) {i->Color.argb(sampler.at(src.left+i%w+0.5,src.top+i/w+0.5),255,255,255)}
-        val output=IntArray(ow*oh);val coverage=ByteArray(ow*oh)
+        val output=FloatArray(ow*oh*4);val coverage=ByteArray(ow*oh)
         val filter=p.optString("interpolation","bilinear")
         fun put(x:Int,y:Int,sx:Double,sy:Double) {
             val i=y*ow+x
-            output[i]=sample(input,w,h,sx-src.left,sy-src.top,filter)
+            sampleFloat(input,w,h,sx-src.left,sy-src.top,filter,output,i*4)
             coverage[i]=Color.alpha(sample(maskInput,w,h,sx-src.left,sy-src.top,filter)).toByte()
         }
         if(plan.inverse!=null) {
@@ -65,10 +82,10 @@ internal object ArtTransformPixels {
                 }
             }
         }
-        require(coverage.any {it.toInt()!=0} && output.any {Color.alpha(it)>0}) {"变换后没有可见像素"}
+        require(coverage.any {it.toInt()!=0} && (0 until ow*oh).any {output[it*4+3]>0}) {"变换后没有可见像素"}
         val mask=ArtSoftSelection.fromAlpha(coverage,dst)
-        val bitmap=Bitmap.createBitmap(output,ow,oh,Bitmap.Config.ARGB_8888)
-        val bytes=try {ArtImagePolicy.encodePng(bitmap,ArtStore.MAX_ASSET_BYTES)} finally {bitmap.recycle()}
+        val bitmap=ArtFloatPixels.from(ow,oh,output)
+        val bytes=try {ArtImagePolicy.encodeAsset(bitmap,ArtStore.MAX_ASSET_BYTES)} finally {bitmap.recycle()}
         return Result(bytes,dst,mask)
     }
     fun validate(p:JSONObject) {

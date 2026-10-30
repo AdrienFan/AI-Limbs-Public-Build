@@ -72,7 +72,7 @@ internal class StudioBezierSelectionInteraction(private val view: View) {
         editMode: Boolean,component: Int,node: Int,mode: String,autoSmooth: Boolean,options:JSONObject,
         onNode: (Int)->Unit,onCreate: (JSONObject)->Unit,onEdit: (JSONObject)->Unit): Boolean {
         if(busy || e.actionMasked==MotionEvent.ACTION_CANCEL) {cancel();return true}
-        if(editMode)return editTouch(e,state,doc,revision,m,component,node,onNode,onEdit)
+        if(editMode)return editTouch(e,state,doc,revision,m,component,node,options.optDouble("angleStep",0.0),onNode,onEdit)
         capture?.let {check(it,doc,revision)}
         if(e.actionMasked==MotionEvent.ACTION_DOWN) {
             if(e.buttonState and MotionEvent.BUTTON_SECONDARY!=0) {command("back",doc,revision,onCreate);return true}
@@ -87,15 +87,16 @@ internal class StudioBezierSelectionInteraction(private val view: View) {
                     val ctrl=e.metaState and KeyEvent.META_CTRL_MASK!=0
                     val chosen=when {shift&&alt->"intersect";ctrl->"replace";shift->"add";alt->"subtract";else->mode}
                     capture=ArtSoftSelection.options(options).put("documentId",doc).put("expectedRevision",revision)
-                        .put("mode",chosen).put("autoSmooth",autoSmooth)
+                        .put("mode",chosen).put("autoSmooth",autoSmooth).put("angleStep",options.optDouble("angleStep",0.0))
                     onDraft(true)
                 }
-                draft.add(ArtPathGeometry.Node(local(e,m)))
+                val point=local(e,m)
+                draft.add(ArtPathGeometry.Node(if(draft.isEmpty())point else ArtSelectionTransform.snapped(draft.last().point,point,capture!!.getDouble("angleStep"))))
             }
         }
         if(pressed && !finish && e.actionMasked in setOf(MotionEvent.ACTION_MOVE,MotionEvent.ACTION_UP)) {
             same(m)
-            val n=draft.last();val p=local(e,m)
+            val n=draft.last();val p=ArtSelectionTransform.snapped(n.point,local(e,m),capture!!.getDouble("angleStep"))
             if(!near(e,n.point,m,4f)) {
                 n.outgoing=p;n.type=if(e.metaState and KeyEvent.META_ALT_MASK!=0)"corner" else "symmetric"
                 n.incoming=if(n.type=="corner")null else n.point*2.0-p
@@ -108,7 +109,7 @@ internal class StudioBezierSelectionInteraction(private val view: View) {
         view.invalidate();return true
     }
     private fun editTouch(e: MotionEvent,state: JSONObject,doc: String,revision: Int,m: Matrix,
-        component: Int,node: Int,onNode: (Int)->Unit,onEdit: (JSONObject)->Unit): Boolean {
+        component: Int,node: Int,angleStep:Double,onNode: (Int)->Unit,onEdit: (JSONObject)->Unit): Boolean {
         editing?.let {check(it,doc,revision);require(it.getInt("componentIndex")==component)}
         val selection=state.optJSONObject("selection") ?: error("当前没有曲线选区")
         val curve=ArtBezierSelection.component(selection,component);val nodes=ArtBezierSelection.nodes(curve)
@@ -123,12 +124,14 @@ internal class StudioBezierSelectionInteraction(private val view: View) {
             if(active<0)return true
             onNode(active);frame=Matrix(m);pointer=local(e,m)
             grab=when(side) {"in"->requireNotNull(nodes[active].incoming);"out"->requireNotNull(nodes[active].outgoing);else->nodes[active].point}
-            editing=JSONObject().put("documentId",doc).put("expectedRevision",revision).put("componentIndex",component)
+            editing=JSONObject().put("documentId",doc).put("expectedRevision",revision).put("componentIndex",component).put("angleStep",angleStep)
         }
         val p=editing ?: return true
         if(e.actionMasked in setOf(MotionEvent.ACTION_MOVE,MotionEvent.ACTION_UP)) {
             same(m)
-            val point=grab+(local(e,m)-pointer)
+            val raw=grab+(local(e,m)-pointer)
+            val origin=if(side.isEmpty())nodes[(active+nodes.size-1)%nodes.size].point else nodes[active].point
+            val point=ArtSelectionTransform.snapped(origin,raw,p.getDouble("angleStep"))
             val action=JSONObject().put("action",if(side.isEmpty())"move_node" else "move_handle")
                 .put("node",active).put("x",point.x).put("y",point.y)
             if(side.isNotEmpty())action.put("side",side)

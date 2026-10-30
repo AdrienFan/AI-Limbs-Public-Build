@@ -7,7 +7,7 @@ import org.json.JSONObject
 internal object ArtAnimation {
     const val MAX_TIME=9999
     const val MAX_KEYS=512
-    val kinds=setOf("paint","image","vector")
+    val kinds=setOf("paint","image","vector","colorize")
     private val shared=setOf("id","name","kind","parentId","visible","locked","animationKeys")
     fun settings(state:JSONObject):JSONObject = state.optJSONObject("animation") ?: JSONObject()
         .put("fps",12).put("start",0).put("end",23).put("loop",true).put("onion",false).put("current",0)
@@ -57,7 +57,7 @@ internal object ArtAnimation {
     }
     fun editable(state:JSONObject,id:String):JSONObject {
         val layer=layers(state).firstOrNull {it.getString("id")==id} ?: error("动画图层不存在")
-        require(layer.getString("kind") in kinds) {"目前动画轨道支持绘画、图像与矢量图层"}
+        require(layer.getString("kind") in kinds) {"目前动画轨道支持绘画、图像、矢量与上色蒙版图层"}
         var target=layer
         repeat(layers(state).size+1) {
             require(!target.getBoolean("locked")) {"动画图层或父组已锁定"}
@@ -84,6 +84,12 @@ internal object ArtAnimation {
                 cel.put("asset","").put("strokes",JSONArray())
                 cel.remove("pixelEdits");cel.remove("contentOrder")
                 if(layer.getString("kind")=="vector")cel.put("shapes",JSONArray())
+                if(layer.getString("kind")=="colorize") {
+                    val data=cel.getJSONObject("colorize");data.put("keys",JSONArray()).put("palette",JSONArray())
+                        .put("generation",0).put("outputGeneration",-1).put("sourceSignature","")
+                        .put("outputX",0).put("outputY",0).put("outputWidth",0).put("outputHeight",0)
+                    data.remove("outputToLayer")
+                }
             }
             result.put("cel",cel)
         }

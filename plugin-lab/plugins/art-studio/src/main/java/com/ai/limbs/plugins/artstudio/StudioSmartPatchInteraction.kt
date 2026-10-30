@@ -28,13 +28,7 @@ internal class StudioSmartPatchInteraction {
         if(busy || event.actionMasked==MotionEvent.ACTION_CANCEL) {cancel();return true}
         if(event.actionMasked==MotionEvent.ACTION_DOWN) {
             cancel()
-            val layer=ArtMenuOperations.layers(state).first { it.getString("id")==layerId }
-            require(layer.getString("kind") in setOf("paint","image") &&
-                layer.getBoolean("visible") && !layer.getBoolean("locked")) { "请选择未锁定的可见绘画或图像图层" }
-            require(layer.optString("parentId").isBlank() && layer.getDouble("x")==0.0 &&
-                layer.getDouble("y")==0.0 && layer.getDouble("scale")==1.0 && !layer.has("affine") && layer.getDouble("rotation")==0.0) {
-                "基础智能修补需要未变换的根图层"
-            }
+            ArtPixelCoordinates.target(state,layerId)
             ArtSmartPatch.options(settings)
             require(matrix.invert(inverse)) { "当前视图无法转换修补坐标" }
             toScreen=Matrix(matrix);options=JSONObject(settings.toString())

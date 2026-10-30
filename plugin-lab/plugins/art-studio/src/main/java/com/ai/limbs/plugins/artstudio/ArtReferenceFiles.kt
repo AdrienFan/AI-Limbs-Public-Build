@@ -109,13 +109,13 @@ internal object ArtReferenceFiles {
         val refs=(0 until a.length()).map {a.getJSONObject(it)}
         val names=refs.map {it.getString("image")};require(names.distinct().size==names.size&&names.toSet()==entries.keys)
         val signature=byteArrayOf(-119,80,78,71,13,10,26,10)
-        for(data in entries.values)require(data.size>=8&&data.copyOfRange(0,8).contentEquals(signature)) {"集合图片须为PNG"}
+        for(data in entries.values)require(ArtOpenExr.matches(data) || data.size>=8&&data.copyOfRange(0,8).contentEquals(signature)) {"集合图片须为PNG或OpenEXR"}
         return Collection(refs,entries)
     }
     fun info()=JSONObject().put("collectionFormat",FORMAT).put("extension",".ailrefs").put("maxReferences",16)
         .put("maxImageBytes",IMAGE_BYTES).put("maxCollectionBytes",COLLECTION_BYTES)
         .put("sourceSchemes",JSONArray(listOf("https","file","content"))).put("defaultKeepLinks",false)
-        .put("linkPolicy","Saved PNG snapshot + externalSource; only explicit refresh reads source; failures do not replace saved reference")
+        .put("linkPolicy","Saved PNG/linear-HALF-EXR snapshot + externalSource; encoded content identifies the codec; legacy .png slots remain opaque archive resource names; only explicit refresh reads source")
         .put("clipboard","Phone foreground: first image URI/image URL; AI reference.paste: studio clipboard or supplied image base64; no background system clipboard read")
         .put("collectionPolicy","Images/order/matrix/style; import appends all in one undoable operation; new IDs; keepLinks false creates embedded portable copies")
 }

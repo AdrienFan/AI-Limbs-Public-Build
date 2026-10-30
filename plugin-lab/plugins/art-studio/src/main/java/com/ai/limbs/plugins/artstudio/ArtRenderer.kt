@@ -35,7 +35,7 @@ internal object ArtRenderer {
         val renderWidth = kotlin.math.round(width * factor).toInt().coerceAtLeast(1)
         val renderHeight = kotlin.math.round(height * factor).toInt().coerceAtLeast(1)
         ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(store, state, renderWidth, renderHeight)+ArtBrush.renderOverhead(state,renderWidth,renderHeight), "画布合成")
-        val bitmap = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
+        val bitmap = ArtFloatPixels.bitmap(renderWidth,renderHeight)
         val canvas = Canvas(bitmap)
         canvas.scale(renderWidth.toFloat() / width, renderHeight.toFloat() / height)
         val background = Color.parseColor(state.getString("background"))
@@ -44,8 +44,7 @@ internal object ArtRenderer {
         val brushResources = linkedMapOf<String, Bitmap>()
         val brushReader: (String) -> Bitmap = { id -> brushResources[id] ?: run {
             val file=store.assetFile(id)
-            val bounds=android.graphics.BitmapFactory.Options().apply {inJustDecodeBounds=true}
-            android.graphics.BitmapFactory.decodeFile(file.absolutePath,bounds)
+            val bounds=ArtImagePolicy.bounds(file)
             require(bounds.outWidth in 1..512 && bounds.outHeight in 1..512) {"笔刷资源边长须为1–512像素"}
             if(brushResources.size>=8) {val first=brushResources.keys.first();brushResources.remove(first)!!.recycle()}
             ArtImagePolicy.decodeAsset(file).also {brushResources[id]=it}
@@ -64,6 +63,7 @@ internal object ArtRenderer {
             require(depth <= layers.length()) { "图层组存在循环引用" }
             for (i in 0 until layers.length()) {
                 val layer = layers.getJSONObject(i)
+                if(layer.getString("kind")=="selection_mask")continue
                 if (layer.optString("parentId") != parentId || !layer.getBoolean("visible")) continue
                 target.save()
                 target.concat(ArtShapes.localMatrix(layer))
@@ -88,7 +88,7 @@ internal object ArtRenderer {
                     draw(target, layer.getString("id"), depth + 1)
                     target.restore()
                 } else {
-                    val buffer = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
+                    val buffer = ArtFloatPixels.bitmap(renderWidth,renderHeight)
                     try {
                         val local = Canvas(buffer)
                         // Rasterize into the output viewport using the complete document transform.
@@ -108,7 +108,11 @@ internal object ArtRenderer {
                                 val output=ArtImagePolicy.decodeAsset(store.assetFile(layer.getString("asset")))
                                 try {
                                     val outputPaint=Paint(Paint.FILTER_BITMAP_FLAG).apply {if(edit)alpha=100}
-                                    local.drawBitmap(output,data.getInt("outputX").toFloat(),data.getInt("outputY").toFloat(),outputPaint)
+                                    local.save()
+                                    try {
+                                        if(data.has("outputToLayer"))local.concat(ArtShapes.matrix(data.getJSONArray("outputToLayer")))
+                                        local.drawBitmap(output,data.getInt("outputX").toFloat(),data.getInt("outputY").toFloat(),outputPaint)
+                                    } finally {local.restore()}
                                 } finally {output.recycle()}
                             }
                             if(edit) {
@@ -149,8 +153,10 @@ internal object ArtRenderer {
                                         val inserted = ArtImagePolicy.decodeAsset(store.assetFile(event.getString("asset")))
                                         try {
                                             val insertPaint = ArtPixelBlend.paint(event)
-                                            local.drawBitmap(inserted, event.getInt("x").toFloat(),
-                                                event.getInt("y").toFloat(), insertPaint)
+                                            ArtPixelCoordinates.draw(local,event) {
+                                                local.drawBitmap(inserted, event.getInt("x").toFloat(),
+                                                    event.getInt("y").toFloat(), insertPaint)
+                                            }
                                         } finally { inserted.recycle() }
                                     }
                                     else -> error("未知像素编辑记录")
@@ -601,7 +607,7 @@ internal object ArtRenderer {
             temp.delete()
         }
         return JSONObject().put("path", destination.absolutePath).put("name", filename)
-            .put("mime", mime).put("bytes", destination.length()).put("format", format)
+            .put("mime", mime).put("bytes", destination.length()).put("format", format).put("bitDepth",if(format=="exr")16 else 8).put("hdrPreserved",format=="exr").put("colorSpace",if(format=="exr")"linear-extended-sRGB" else "sRGB")
             .put("documentId", snapshot.getString("id")).put("revision", snapshot.getInt("revision"))
             .put("mode", if (animated) "timeline_current_frame" else "static_image")
             .apply { if (animated) put("frame", frame) }.put("notice", encoding.notice)

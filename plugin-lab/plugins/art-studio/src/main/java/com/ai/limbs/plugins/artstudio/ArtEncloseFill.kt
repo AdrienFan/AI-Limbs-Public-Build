@@ -13,7 +13,7 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
 
-/** Independent RGBA8 enclosing/region solver. Only the final overlay enters document history. */
+/** Linear floating-point HDR enclosing/region solver. Only the final overlay enters document history. */
 internal object ArtEncloseFill {
     const val MAX_POINTS=2048
     const val MAX_PIXELS=4_194_304
@@ -24,7 +24,7 @@ internal object ArtEncloseFill {
         "surrounded_color" to "被指定颜色包围","surrounded_transparent" to "被透明包围",
         "surrounded_color_or_transparent" to "被指定颜色或透明包围")
     val surroundedModes=setOf("surrounded_color","surrounded_transparent","surrounded_color_or_transparent")
-    val pending=listOf("变换及组内图层写入","HDR 与动画场景完整验收")
+    val pending=emptyList<String>()
     fun defaults()=JSONObject().put("shape","lasso").put("mode","all")
         .put("regionColor","#FFFFFFFF").put("tolerance",15).put("includeContour",false).put("includeSurrounding",true)
         .put("invert",false).put("reference","visible").put("width",32)
@@ -38,9 +38,10 @@ internal object ArtEncloseFill {
         .put("pipeline","围合分区及颜色软覆盖 -> 反选 -> 扩缩/最暗停止 -> 羽化或AA -> min现有选区 -> 纯色/变换图案 -> 目标层内混合")
         .put("pending",JSONArray(pending)).put("gapScope","仅颜色／透明条件；形态学开运算断开窄通道，再恢复选中区域边缘")
         .put("surrounded","从围合边缘搜索非包围颜色区域，反选并限制在围合内；includeSurrounding控制包围颜色本身，includeContour控制结果接触围合边缘；gapClose关闭非包围区域的窄通道")
-        .put("scope","当前未锁定的可见、未变换根绘画或图像层；参考可选当前层原始像素、可见图层或颜色标签层合成，不含文档背景及辅助对象")
+        .put("scope","当前可见未锁定绘画或图像层，支持对象及父组变换；参考可选当前层、可见图层或颜色标签层合成，不含文档背景及辅助对象")
     fun options(input: JSONObject): JSONObject {
         val p=defaults()
+        for(key in listOf("linearRGBA","regionLinearRGBA"))if(input.has(key)) {ArtFloatPixels.color(input.getJSONArray(key));p.put(key,input.getJSONArray(key))}
         for(key in p.keys().asSequence().toList()) if(input.has(key))p.put(key,input.get(key))
         require(p.getString("shape") in shapes && p.getString("mode") in modes)
         val shared=JSONObject(p.toString()).put("mode","replace")
@@ -59,8 +60,6 @@ internal object ArtEncloseFill {
     fun target(layer: JSONObject) {
         require(layer.getString("kind") in setOf("paint","image") && layer.getBoolean("visible") &&
             !layer.getBoolean("locked")) {"请选择未锁定的可见绘画或图像图层"}
-        require(layer.optString("parentId").isBlank() && layer.getDouble("x")==0.0 && layer.getDouble("y")==0.0 &&
-            layer.getDouble("scale")==1.0 && !layer.has("affine") && layer.getDouble("rotation")==0.0) {"基础围合填充需要未变换的根图层"}
     }
     fun points(input: JSONArray): List<Pair<Float,Float>> {
         require(input.length() in 1..MAX_POINTS) {"围合路径需要1–2048点"}
@@ -193,24 +192,24 @@ internal object ArtEncloseFill {
     }
     fun solve(state: JSONObject,source: Bitmap,p: JSONObject,area: Area,color: Int,resources:((String)->Bitmap)?=null): Result {
         val rect=area.rect;val w=rect.width();val h=rect.height();val n=w*h
-        val reference=IntArray(n);source.getPixels(reference,0,w,rect.left,rect.top,w,h)
+        val reference=ArtFloatPixels.read(source,rect)
         val outline=Region().apply {setPath(area.path,Region(rect))}
         val inside=ByteArray(n) {i->if(outline.contains(rect.left+i%w,rect.top+i/w))255.toByte() else 0}
         require(inside.any {it.toInt()!=0}) {"围合面积不足一个像素"}
         val mode=p.getString("mode");val all=mode=="all";val threshold=p.getInt("tolerance")*255/100
-        val wanted=Color.parseColor(p.getString("regionColor"));val spread=p.getInt("opacitySpread")
+        val wanted=Color.parseColor(p.getString("regionColor"));val spread=p.getInt("opacitySpread");val wantedFloat=if(p.has("regionLinearRGBA"))ArtFloatPixels.color(p.getJSONArray("regionLinearRGBA")) else ArtFloatPixels.color(wanted)
         var selected:ByteArray;var regions:Int
         if(mode in surroundedModes) {
             val barrierMode=mode.removePrefix("surrounded_")
             val barrier=ByteArray(n) {i->condition(barrierMode,
-                ramp(ArtColorSelection.difference(reference[i],wanted),threshold,spread),
-                ramp(Color.alpha(reference[i]),threshold,spread)).toByte()}
+                ramp(ArtFloatPixels.difference(reference,i*4,wantedFloat),threshold,spread),
+                ramp((reference[i*4+3]*255).toInt().coerceIn(0,255),threshold,spread)).toByte()}
             val result=surrounded(inside,barrier,w,h,p.getInt("gapClose"),p.getBoolean("includeSurrounding"),p.getBoolean("includeContour"))
             selected=result.first;regions=result.second
         } else {
         val candidate=ByteArray(n) {i->if(inside[i].toInt()==0)0 else condition(mode,
-            ramp(ArtColorSelection.difference(reference[i],wanted),threshold,spread),
-            ramp(Color.alpha(reference[i]),threshold,spread)).toByte()}
+            ramp(ArtFloatPixels.difference(reference,i*4,wantedFloat),threshold,spread),
+            ramp((reference[i*4+3]*255).toInt().coerceIn(0,255),threshold,spread)).toByte()}
         val membership=ByteArray(n) {i->if(candidate[i].toInt()!=0)255.toByte() else 0}
         val gap=p.getInt("gapClose")
         val core=if(gap==0)membership else ArtColorSelection.morph(ArtColorSelection.morph(membership,w,h,gap,false),w,h,gap,true)
@@ -222,7 +221,7 @@ internal object ArtEncloseFill {
             while(head<tail) {
                 val i=queue[head++];if(interior[i].toInt()==0)contour=true
                 fun visit(j: Int) {
-                    if(!visited[j] && core[j].toInt()!=0 && (!all || ArtColorSelection.difference(reference[j],reference[seed])<=threshold)) {
+                    if(!visited[j] && core[j].toInt()!=0 && (!all || ArtFloatPixels.difference(reference,j*4,reference,seed*4)<=threshold)) {
                         visited[j]=true;queue[tail++]=j
                     }
                 }
@@ -231,7 +230,7 @@ internal object ArtEncloseFill {
             }
             if(p.getBoolean("includeContour") || !contour) {
                 regions++;for(k in 0 until tail) {val i=queue[k];selected[i]=if(all)
-                    ramp(ArtColorSelection.difference(reference[i],reference[seed]),threshold,spread).toByte() else candidate[i]}
+                    ramp(ArtFloatPixels.difference(reference,i*4,reference,seed*4),threshold,spread).toByte() else candidate[i]}
             }
         }
         if(gap>0) {
@@ -241,7 +240,7 @@ internal object ArtEncloseFill {
         }
         if(p.getBoolean("invert"))for(i in 0 until n)selected[i]=if(inside[i].toInt()!=0)(255-(selected[i].toInt() and 255)).toByte() else 0
         val effects=JSONObject(p.toString()).put("mode","replace").put("limitToSelection",false)
-        val mask=ArtColorSelection.finish(state,source,ArtColorSelection.Mask(selected,rect,wanted),effects)
+        val mask=ArtColorSelection.finish(state,source,ArtColorSelection.Mask(selected,rect,wanted),effects,reference=reference)
         state.optJSONObject("selection")?.let {selection->
             val sampler=ArtSoftSelection.Sampler(selection)
             for(i in 0 until n)mask.alpha[i]=minOf(mask.alpha[i].toInt() and 255,
@@ -250,8 +249,7 @@ internal object ArtEncloseFill {
         val paint=JSONObject(p.toString()).put("color",String.format("#%08X",color))
         val bitmap=ArtContiguousFill.paint(mask,paint,resources)
         try {
-            val row=IntArray(w);var filled=0
-            for(y in 0 until h) {bitmap.getPixels(row,0,w,0,y,w,1);filled+=row.count {Color.alpha(it)>0}}
+            val pixels=ArtFloatPixels.read(bitmap);val filled=(0 until w*h).count {pixels[it*4+3]>0}
             return Result(bitmap,filled,regions)
         } catch(error:Throwable) {bitmap.recycle();throw error}
     }

@@ -17,6 +17,10 @@ internal fun StudioEncloseFillOptions(store:ArtStore,settings: JSONObject,busy: 
     var importing by remember {mutableStateOf(false)}
     val enabled=!busy&&!draft&&!importing
     fun set(key: String,value: Any) {onSettings(JSONObject(settings.toString()).put(key,value))}
+    StudioHdrColorControls("HDR填充色",settings.optJSONArray("linearRGBA"),enabled) {value->
+        onSettings(JSONObject(settings.toString()).apply {if(value==null)remove("linearRGBA") else put("linearRGBA",value)})}
+    StudioHdrColorControls("HDR包围／条件色",settings.optJSONArray("regionLinearRGBA"),enabled) {value->
+        onSettings(JSONObject(settings.toString()).apply {if(value==null)remove("regionLinearRGBA") else put("regionLinearRGBA",value)})}
     Text("套索、矩形、椭圆和画笔松手填色；贝塞尔闭合后填色。围合不替换现有选区；选区只限制最后写入，可一次撤销。")
     Text("围合方式")
     Row(Modifier.horizontalScroll(rememberScrollState())) {

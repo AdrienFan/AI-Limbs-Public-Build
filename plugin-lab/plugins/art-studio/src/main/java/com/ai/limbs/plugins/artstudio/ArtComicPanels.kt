@@ -16,21 +16,23 @@ internal object ArtComicPanels {
     const val PATH_TOLERANCE=0.25f
     private const val EPS=0.00001
     val presets=linkedMapOf("thick" to "厚间隙","thin" to "薄间隙","special" to "特殊间隙")
-    val pending=listOf("物理单位和宽度预设文件","保留原始三次曲线控制柄的精确布尔切分")
+    val pending=emptyList<String>()
     fun defaults()=JSONObject().put("mode","cut").put("automatic",true).put("preset","thick")
         .put("thick",12.0).put("thin",6.0).put("special",8.0).put("horizontal","thick")
-        .put("vertical","thin").put("diagonal","special").put("angle",15.0).put("selectedOnly",false)
+        .put("unit","px").put("ppi",300.0).put("vertical","thin").put("diagonal","special").put("angle",15.0).put("selectedOnly",false)
     fun options(p: JSONObject): JSONObject {
         val o=defaults();o.keys().forEach {if(p.has(it))o.put(it,p.get(it))}
         require(o.getString("mode") in setOf("cut","merge"))
         for(key in listOf("preset","horizontal","vertical","diagonal"))require(o.getString(key) in presets)
-        for(key in presets.keys)require(o.getDouble(key).isFinite() && o.getDouble(key) in 0.0..512.0) {"间隙宽度需要在0–512像素之间"}
+        require(o.getString("unit") in setOf("px","mm","cm","in","pt"))
+        require(o.getDouble("ppi").isFinite() && o.getDouble("ppi") in 1.0..2400.0)
+        for(key in presets.keys)require(o.getDouble(key).isFinite() && ArtMove.toPixels(o.getDouble(key),o.getString("unit"),o.getDouble("ppi")) in 0.0..512.0) {"间隙宽度需要在0–512像素之间"}
         require(o.getDouble("angle").isFinite() && o.getDouble("angle") in 0.0..45.0)
         o.getBoolean("automatic");o.getBoolean("selectedOnly")
         return o
     }
     fun info()=JSONObject().put("defaults",defaults()).put("pending",JSONArray(pending))
-        .put("coordinateSpace","document").put("unit","px").put("maxVertices",MAX_VERTICES)
+        .put("coordinateSpace","document").put("unit","px/mm/cm/in/pt; tool PPI; persisted width profiles").put("maxVertices",MAX_VERTICES)
         .put("cutScope","closed rectangle/ellipse/polygon/path; concave, holes and multiple closed subpaths; finite gesture must span every crossed contour")
         .put("mergeScope","two facing edge segments, including nonparallel edges and two sides of a hole in one object; bridge only their shared projected interval, width <=512px, reject overlaps with other filled contours")
         .put("geometry","Path boolean operations; output closed polyline paths, document-space approximation tolerance 0.25px; <=2048 drawing segments and <=64 contours per result; original control handles are not retained")
@@ -146,7 +148,7 @@ internal object ArtComicPanels {
         val horizontal=min(degrees,180-degrees);val vertical=abs(degrees-90)
         val preset=if(!o.getBoolean("automatic"))o.getString("preset") else if(horizontal<=o.getDouble("angle"))o.getString("horizontal")
             else if(vertical<=o.getDouble("angle"))o.getString("vertical") else o.getString("diagonal")
-        return o.getDouble(preset)
+        return ArtMove.toPixels(o.getDouble(preset),o.getString("unit"),o.getDouble("ppi"))
     }
     private fun resultShape(panel:Panel,path:Path):JSONObject {
         val inverse=Matrix();require(panel.matrix.invert(inverse)) {"分格对象变换不可逆"}

@@ -90,19 +90,18 @@ internal object ArtColorSelection {
         };return out
     }
     /** Grow coverage normally, then gate it by an eight-neighbor monotone darkness/opacity frontier. */
-    private fun growAtDarkest(input:ByteArray,pixels:IntArray,w:Int,h:Int,radius:Int):ByteArray {
+    private fun growAtDarkest(input:ByteArray,pixels:FloatArray,w:Int,h:Int,radius:Int):ByteArray {
         val grown=morph(input,w,h,radius,true);val allowed=ByteArray(input.size);val queue=IntArray(input.size)
         var head=0;var tail=0
         for(i in input.indices)if(input[i].toInt()!=0) {allowed[i]=1;queue[tail++]=i}
-        fun intensity(c:Int)=(Color.red(c)*0.2126+Color.green(c)*0.7152+Color.blue(c)*0.0722).roundToInt()
+        fun intensity(i:Int):Float {val a=pixels[i*4+3];return if(a==0f)0f else (pixels[i*4]*0.2126f+pixels[i*4+1]*0.7152f+pixels[i*4+2]*0.0722f)/a}
         while(head<tail) {
-            val i=queue[head++];val x=i%w;val y=i/w;val previous=pixels[i];val opacity=Color.alpha(previous)
+            val i=queue[head++];val x=i%w;val y=i/w;val opacity=pixels[i*4+3]
             for(dy in -1..1)for(dx in -1..1) {
                 if(dx==0&&dy==0||x+dx !in 0 until w||y+dy !in 0 until h)continue
                 val j=(y+dy)*w+x+dx
                 if(allowed[j].toInt()!=0||grown[j].toInt()==0)continue
-                val next=pixels[j]
-                if(Color.alpha(next)>=opacity&&(opacity==0||intensity(next)<=intensity(previous))) {allowed[j]=1;queue[tail++]=j}
+                if(pixels[j*4+3]>=opacity&&(opacity==0f||intensity(j)<=intensity(i))) {allowed[j]=1;queue[tail++]=j}
             }
         }
         for(i in grown.indices)if(allowed[i].toInt()==0)grown[i]=0
@@ -114,9 +113,9 @@ internal object ArtColorSelection {
         val o=options(p,gapLimit);val r=bounds(state,p);val w=r.width();val h=r.height();val n=w*h
         ArtImagePolicy.requireBytes(n.toLong()*40,"颜色软选区搜索")
         val x=p.getInt("x");val y=p.getInt("y");require(r.contains(x,y)) {"取样点不在查找范围内"}
-        val pixels=IntArray(n);source.getPixels(pixels,0,w,r.left,r.top,w,h)
-        val seed=(y-r.top)*w+x-r.left;val sampled=pixels[seed];val threshold=o.getInt("tolerance")*255/100
-        val boundaryMode=connected&&o.getBoolean("boundaryMode");val boundary=Color.parseColor(o.getString("boundaryColor"))
+        val pixels=ArtFloatPixels.read(source,r)
+        val seed=(y-r.top)*w+x-r.left;val sampled=ArtFloatPixels.preview(pixels,seed*4);val threshold=o.getInt("tolerance")*255/100
+        val boundaryMode=connected&&o.getBoolean("boundaryMode");val boundary=ArtFloatPixels.color(Color.parseColor(o.getString("boundaryColor")))
         val limit=if(o.getBoolean("limitToSelection")) {
             val selected=state.optJSONObject("selection") ?: error("请先建立查找范围选区")
             val sampler=ArtSoftSelection.Sampler(selected)
@@ -129,7 +128,7 @@ internal object ArtColorSelection {
             if(!boundaryMode)return if(d<threshold)((threshold-d)*255L*100/(threshold*(100-spread))).toInt().coerceIn(0,255) else 0
             return if(d<threshold)(255-(threshold-d)*255L*100/(threshold*(100-spread))).toInt().coerceIn(0,255) else 255
         }
-        val candidate=ByteArray(n) {i->if(limit!=null&&limit[i].toInt()==0)0 else coverage(difference(pixels[i],if(boundaryMode)boundary else sampled)).toByte()}
+        val candidate=ByteArray(n) {i->if(limit!=null&&limit[i].toInt()==0)0 else coverage(if(boundaryMode)ArtFloatPixels.difference(pixels,i*4,boundary) else ArtFloatPixels.difference(pixels,i*4,pixels,seed*4)).toByte()}
         var output=if(!connected)candidate else {
             val gap=o.getInt("gapClose")
             val membership=ByteArray(n) {i->if(candidate[i].toInt()!=0)255.toByte() else 0}
@@ -152,18 +151,17 @@ internal object ArtColorSelection {
             ByteArray(n) {i->if(reached[i].toInt()!=0)candidate[i] else 0}
         }
         val raw=Mask(output,r,sampled)
-        return if(applyEffects)finish(state,source,raw,p,gapLimit) else raw
+        return if(applyEffects)finish(state,source,raw,p,gapLimit,pixels) else raw
     }
-    fun finish(state:JSONObject,source:Bitmap,raw:Mask,p:JSONObject,gapLimit:Int=8):Mask {
-        val o=options(p,gapLimit);val r=raw.bounds;val w=r.width();val h=r.height();val pixels=IntArray(w*h)
-        source.getPixels(pixels,0,w,r.left,r.top,w,h);var output=raw.alpha
+    fun finish(state:JSONObject,source:Bitmap,raw:Mask,p:JSONObject,gapLimit:Int=8,reference:FloatArray?=null):Mask {
+        val o=options(p,gapLimit);val r=raw.bounds;val w=r.width();val h=r.height();var output=raw.alpha
         val limit=if(o.getBoolean("limitToSelection")) {
             val selected=state.optJSONObject("selection") ?: error("请先建立查找范围选区")
             val sampler=ArtSoftSelection.Sampler(selected)
             ByteArray(w*h) {i->sampler.at(r.left+i%w+0.5,r.top+i/w+0.5).toByte()}
         } else null
         val expand=o.getInt("expand")
-        if(expand!=0)output=if(expand>0&&o.getBoolean("stopAtDarkest"))growAtDarkest(output,pixels,w,h,expand) else morph(output,w,h,abs(expand),expand>0)
+        if(expand!=0)output=if(expand>0&&o.getBoolean("stopAtDarkest"))growAtDarkest(output,reference ?: ArtFloatPixels.read(source,r),w,h,expand) else morph(output,w,h,abs(expand),expand>0)
         val feather=o.getInt("feather")
         output=if(feather>0)ArtSoftSelection.blur(output,w,h,feather) else antialias(output,w,h,o.getDouble("antialias"))
         if(limit!=null)for(i in output.indices)output[i]=minOf(output[i].toInt() and 255,limit[i].toInt() and 255).toByte()

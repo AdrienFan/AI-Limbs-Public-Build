@@ -28,7 +28,7 @@ internal object ArtImagePolicy {
     private const val MAX_WORK_BYTES = 384 * MIB
     // Conservative working estimate includes software decoding, 8-bit normalization and PNG buffers.
     // Allow for an F16 software decode, ARGB copy, codec workspace and growing/copying PNG buffers.
-    private const val IMPORT_BYTES_PER_PIXEL = 32L
+    private const val IMPORT_BYTES_PER_PIXEL = 56L
 
     fun dimensionsValid(width: Int, height: Int): Boolean =
         width in 1..MAX_EDGE && height in 1..MAX_EDGE
@@ -108,6 +108,18 @@ internal object ArtImagePolicy {
 
     fun decode(bytes: ByteArray, confirmation: JSONObject? = null,
                extraBytes: Long = 0): Pair<Bitmap, JSONObject> {
+        if(ArtOpenExr.matches(bytes)) {
+            val header=ArtOpenExr.header(bytes)
+            val size=target(bytes,header.width,header.height,confirmation,extraBytes)
+            requireWorkingSize(size.first,size.second)
+            val image=ArtOpenExr.decode(bytes,size.first.toLong()*size.second,size.first,size.second)
+            return ArtFloatPixels.from(size.first,size.second,image.pixels) to JSONObject()
+                .put("width",size.first).put("height",size.second).put("originalWidth",header.width).put("originalHeight",header.height)
+                .put("mime","image/x-exr").put("animated",false).put("frameIndex",0).put("animationPreserved",false)
+                .put("colorSpace","linear-extended-sRGB").put("bitDepth",16).put("pixelType","float")
+                .put("dataWindowX",header.x).put("dataWindowY",header.y).put("resized",size.first!=header.width || size.second!=header.height)
+                .put("resizeFilter","nearest-linear-float").put("warnings",JSONArray())
+        }
         val metadata = JSONObject()
         val decoded = try {
             // Decode from bytes, never the file suffix or picker MIME. The header callback runs
@@ -125,12 +137,12 @@ internal object ArtImagePolicy {
                     throw ArtImageResizeRequired(resizePlan(bytes, originalWidth, originalHeight, budgetBytes(), extraBytes))
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                 decoder.setTargetSize(width, height)
-                decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB))
+                decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.LINEAR_EXTENDED_SRGB))
                 metadata.put("originalWidth", originalWidth).put("originalHeight", originalHeight)
                     .put("mime", info.mimeType).put("animated", info.isAnimated)
                     .put("headerColorSpace", info.colorSpace?.name ?: JSONObject.NULL)
                     .put("frameIndex", 0).put("animationPreserved", false)
-                    .put("colorSpace", "sRGB").put("bitDepth", 8)
+                    .put("colorSpace", "linear-extended-sRGB").put("bitDepth", 16).put("pixelType","float")
                     .put("resized", width != originalWidth || height != originalHeight)
                 metadata.put("warnings", JSONArray().apply {
                     if (info.isAnimated) put("此动图仅导入首帧，当前工程不保留动画；原文件保持不变。")
@@ -139,17 +151,30 @@ internal object ArtImagePolicy {
         } catch (error: ImageDecoder.DecodeException) {
             throw IllegalArgumentException("图片无法解码：文件可能损坏，或当前运行环境缺少该图片编码的系统解码器。", error)
         }
-        val bitmap = if (decoded.config == Bitmap.Config.ARGB_8888) decoded else {
+        if(android.os.Build.VERSION.SDK_INT>=34 && decoded.hasGainmap()) {
+            decoded.recycle();error("此图片含Ultra HDR增益图；当前高位深导入支持EXR或直接高位深像素，不会丢弃增益图后导入SDR底图。请先转换为OpenEXR。")
+        }
+        if(bytes.size>25 && bytes[0]==(-119).toByte() && bytes[1]==80.toByte() && bytes[2]==78.toByte() && bytes[3]==71.toByte() && bytes[24]==16.toByte()) {
+            require(decoded.config==Bitmap.Config.RGBA_F16) {"系统解码器未保留16位PNG精度，已拒绝导入"}
+        }
+        val bitmap = if (decoded.config == Bitmap.Config.RGBA_F16 && decoded.colorSpace==ArtFloatPixels.space) decoded else {
             try {
-                decoded.copy(Bitmap.Config.ARGB_8888, false) ?: error("图片转换为 8 位工程失败")
+                ArtFloatPixels.bitmap(decoded.width,decoded.height).also {android.graphics.Canvas(it).drawBitmap(decoded,0f,0f,null)}
             } finally { decoded.recycle() }
         }
         bitmap.density = Bitmap.DENSITY_NONE
         return bitmap to metadata.put("width", bitmap.width).put("height", bitmap.height)
     }
 
+    fun encodeAsset(bitmap:Bitmap,limit:Int):ByteArray = if(bitmap.config==Bitmap.Config.RGBA_F16)
+        ArtOpenExr.encode(bitmap.width,bitmap.height,ArtFloatPixels.read(bitmap),limit) else encodePng(bitmap,limit)
+
     /** Compressed photos may grow greatly when normalized to the lossless project asset format. */
     fun encodePng(bitmap: Bitmap, limit: Int): ByteArray {
+        if(bitmap.config==Bitmap.Config.RGBA_F16) {
+            val preview=Bitmap.createBitmap(bitmap.width,bitmap.height,Bitmap.Config.ARGB_8888)
+            try {android.graphics.Canvas(preview).drawBitmap(bitmap,0f,0f,null);return encodePng(preview,limit)} finally {preview.recycle()}
+        }
         require(limit > 0) { "PNG 缓冲上限无效" }
         class BoundedOutput : OutputStream() {
             val buffer = ByteArrayOutputStream()
@@ -173,15 +198,42 @@ internal object ArtImagePolicy {
     }
 
     fun assetPixels(file: File): Long {
+        if(isExr(file)) {
+            val header=ArtOpenExr.header(file.inputStream().use {it.readNBytes(1024*1024)})
+            return header.width.toLong()*header.height
+        }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true; inScaled = false }
         BitmapFactory.decodeFile(file.absolutePath, bounds)
         requireDimensions(bounds.outWidth, bounds.outHeight)
         return bounds.outWidth.toLong() * bounds.outHeight
     }
 
-    fun decodeAsset(file: File): Bitmap = BitmapFactory.decodeFile(file.absolutePath,
-        BitmapFactory.Options().apply { inScaled = false; inPreferredConfig = Bitmap.Config.ARGB_8888 })
-        ?: error("工程图片资源无效：${file.name}")
+    private fun isExr(file:File)=file.inputStream().use {ArtOpenExr.matches(it.readNBytes(4))}
+    fun bounds(file:File):BitmapFactory.Options {
+        if(isExr(file)) {val h=ArtOpenExr.header(file.inputStream().use {it.readNBytes(1024*1024)})
+            return BitmapFactory.Options().apply {outWidth=h.width;outHeight=h.height}}
+        return BitmapFactory.Options().apply {inJustDecodeBounds=true;inScaled=false;BitmapFactory.decodeFile(file.absolutePath,this)}
+    }
+    fun bounds(bytes:ByteArray):BitmapFactory.Options {
+        if(ArtOpenExr.matches(bytes)) {val h=ArtOpenExr.header(bytes);return BitmapFactory.Options().apply {outWidth=h.width;outHeight=h.height}}
+        return BitmapFactory.Options().apply {inJustDecodeBounds=true;inScaled=false;BitmapFactory.decodeByteArray(bytes,0,bytes.size,this)}
+    }
+    fun decodeAssetBytes(bytes:ByteArray):Bitmap {
+        if(ArtOpenExr.matches(bytes)) {val h=ArtOpenExr.header(bytes);requireBytes(h.width.toLong()*h.height*40+bytes.size,"高位深资源解码")
+            val image=ArtOpenExr.decode(bytes,h.width.toLong()*h.height);return ArtFloatPixels.from(h.width,h.height,image.pixels)}
+        return BitmapFactory.decodeByteArray(bytes,0,bytes.size,
+            BitmapFactory.Options().apply {inScaled=false;inPreferredConfig=Bitmap.Config.RGBA_F16;inPreferredColorSpace=ArtFloatPixels.space}) ?: error("图像资源无法解码")
+    }
+    fun decodeAsset(file: File): Bitmap {
+        if(isExr(file)) {
+            val pixels=assetPixels(file);requireBytes(pixels*40+file.length(),"高位深资源解码")
+            val image=ArtOpenExr.decode(file.readBytes(),pixels)
+            return ArtFloatPixels.from(image.header.width,image.header.height,image.pixels)
+        }
+        return BitmapFactory.decodeFile(file.absolutePath,
+            BitmapFactory.Options().apply {inScaled=false;inPreferredConfig=Bitmap.Config.RGBA_F16;inPreferredColorSpace=ArtFloatPixels.space})
+            ?: error("工程图片资源无效：${file.name}")
+    }
 
     fun renderBytes(store: ArtStore, state: JSONObject, width: Int, height: Int): Long {
         val layers = state.getJSONArray("layers")
@@ -214,6 +266,6 @@ internal object ArtImagePolicy {
             }
         }
         // Moving a soft selection needs a temporary erase surface plus its decoded/padded mask.
-        return width.toLong() * height * (3L + depth + (if(moveMaskWork>0)1L else 0L)) * 4 + largestAsset * 4 + moveMaskWork
+        return width.toLong() * height * (3L + depth + (if(moveMaskWork>0)1L else 0L)) * 8 + largestAsset * 40 + moveMaskWork
     }
 }

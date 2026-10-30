@@ -1,5 +1,7 @@
 # 画室常用图片格式读取（0.2.19）
 
+> 本文保留当时版本记录；0.2.99新增HDR、变换／分组与工具补齐状态以[当前范围](../art-studio-v0299-tool-gaps/index.md)为准。
+
 Fork: https://github.com/AdrienFan/AI-Limbs-Public-Build
 
 基础源码：已部署 0.2.18，ddda307c；CURRENT 与 ail-source 已核对。范围仅画室插件，不改宿主。

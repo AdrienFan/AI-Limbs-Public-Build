@@ -9,9 +9,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import org.json.JSONObject
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
+import android.util.Log
 
 @Composable
-internal fun StudioComicPanelOptions(snapshot: JSONObject,layerId: String,busy: Boolean,settings: JSONObject,
+internal fun StudioComicPanelOptions(store:ArtStore,snapshot: JSONObject,layerId: String,busy: Boolean,settings: JSONObject,
     onSettings: (JSONObject)->Unit,onLayer: (JSONObject)->Unit,onFrame: (JSONObject)->Unit,onStyle: (JSONObject)->Unit) {
     val state=snapshot.getJSONObject("state")
     val layer=ArtMenuOperations.layers(state).firstOrNull {it.getString("id")==layerId}
@@ -22,6 +27,44 @@ internal fun StudioComicPanelOptions(snapshot: JSONObject,layerId: String,busy: 
     var border by remember {mutableStateOf("#FF161616")}
     fun set(key: String,value: Any) {onSettings(JSONObject(settings.toString()).put(key,value))}
     fun base()=JSONObject().put("documentId",snapshot.getString("id")).put("expectedRevision",snapshot.getInt("revision")).put("layerId",layerId)
+    val scope=rememberCoroutineScope()
+    var profiles by remember {mutableStateOf(JSONObject().put("revision",0).put("profiles",org.json.JSONArray()))}
+    var profileName by remember {mutableStateOf("")};var working by remember {mutableStateOf(false)};var error by remember {mutableStateOf("")}
+    fun profileOperation(request:JSONObject) {scope.launch {working=true;error=""
+        try {profiles=withContext(Dispatchers.IO) {store.comicProfiles(request)}}
+        catch(e:CancellationException) {throw e}
+        catch(e:Exception) {Log.e("ArtStudio","Comic profile failed",e);error=e.message.orEmpty()} finally {working=false}
+    }}
+    LaunchedEffect(Unit) {
+        try {profiles=withContext(Dispatchers.IO) {store.comicProfiles(JSONObject().put("action","list"))}}
+        catch(e:CancellationException) {throw e}
+        catch(e:Exception) {Log.e("ArtStudio","Comic profiles could not load",e);error=e.message.orEmpty()}
+    }
+    Row(Modifier.horizontalScroll(rememberScrollState())) {
+        listOf("px","mm","cm","in","pt").forEach {unit->FilterChip(selected=settings.getString("unit")==unit,enabled=!busy,
+            onClick={val next=JSONObject(settings.toString())
+                ArtComicPanels.presets.keys.forEach {key->next.put(key,ArtMove.fromPixels(ArtMove.toPixels(settings.getDouble(key),settings.getString("unit"),settings.getDouble("ppi")),unit,settings.getDouble("ppi")))}
+                onSettings(next.put("unit",unit))},label={Text(unit)})}
+    }
+    Text("单位换算PPI："+settings.getDouble("ppi").roundToInt())
+    Slider(settings.getDouble("ppi").toFloat(),{value->
+        val next=JSONObject(settings.toString()).put("ppi",value.toDouble())
+        ArtComicPanels.presets.keys.forEach {key->next.put(key,ArtMove.fromPixels(ArtMove.toPixels(settings.getDouble(key),settings.getString("unit"),settings.getDouble("ppi")),settings.getString("unit"),value.toDouble()))}
+        onSettings(next)
+    },enabled=!busy,valueRange=1f..2400f)
+    OutlinedTextField(profileName,{profileName=it.take(64)},enabled=!busy&&!working,label={Text("分格预设名称")})
+    TextButton(enabled=!busy&&!working&&profileName.isNotBlank(),onClick={
+        profileOperation(JSONObject().put("action","save").put("expectedSettingsRevision",profiles.getLong("revision")).put("name",profileName).put("settings",settings))
+    }) {Text("保存宽度预设")}
+    val savedProfiles=profiles.getJSONArray("profiles")
+    for(i in 0 until savedProfiles.length()) {
+        val item=savedProfiles.getJSONObject(i)
+        Row {
+            TextButton(enabled=!busy&&!working,onClick={onSettings(ArtComicPanels.options(item.getJSONObject("settings")))}) {Text("载入："+item.getString("name"))}
+            TextButton(enabled=!busy&&!working,onClick={profileOperation(JSONObject().put("action","delete").put("expectedSettingsRevision",profiles.getLong("revision")).put("id",item.getString("id")))}) {Text("删除")}
+        }
+    }
+    if(error.isNotEmpty())Text(error,color=MaterialTheme.colorScheme.error)
     Text("先创建矢量层和分格框。切分时从框外拖到框外；合并时从一格内部拖到邻格内部，每次只跨一条间隙。")
     TextButton(enabled=!busy,onClick={onLayer(base().put("name","漫画分格").put("select",true))}) {Text("新建分格矢量层")}
     val maxMargin=(minOf(state.getInt("width"),state.getInt("height"))/4f)
@@ -53,8 +96,8 @@ internal fun StudioComicPanelOptions(snapshot: JSONObject,layerId: String,busy: 
         FilterChip(selected=settings.getBoolean("automatic"),enabled=!busy,
             onClick={set("automatic",!settings.getBoolean("automatic"))},label={Text("按切线角度自动选间隙")})
         ArtComicPanels.presets.forEach {(id,label)->
-            Text("$label：${settings.getDouble(id).roundToInt()} px")
-            Slider(settings.getDouble(id).toFloat(),{set(id,it.toDouble())},enabled=!busy,valueRange=0f..512f)
+            Text(label+"："+String.format("%.2f",settings.getDouble(id))+" "+settings.getString("unit"))
+            Slider(settings.getDouble(id).toFloat(),{set(id,it.toDouble())},enabled=!busy,valueRange=0f..ArtMove.fromPixels(512.0,settings.getString("unit"),settings.getDouble("ppi")).toFloat())
         }
         if(settings.getBoolean("automatic")) {
             for((key,label) in listOf("horizontal" to "横向","vertical" to "竖向","diagonal" to "斜向")) {

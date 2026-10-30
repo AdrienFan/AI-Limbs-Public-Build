@@ -131,6 +131,7 @@ internal object ArtHistory {
                 "LAYER_COPY" -> "复制图层"
                 "SELECTION_TOOL" -> when(operation.getJSONObject("parameters").getString("tool")) {"contiguous"->"连续区域选区";"similar"->"相似色选区";"magnetic"->"磁性套索选区";"adjust"->"调整软选区";else->"创建基本选区"}
                 "SELECTION_BEZIER" -> "贝塞尔曲线选区"
+                "SELECTION_MASK" -> "选区蒙版"
                 "SELECTION_CREATE", "SELECTION_CLEAR", "SELECTION_EDIT" -> "修改选区"
                 "DOCUMENT_RENAME" -> "重命名工程"
                 else -> error("历史操作缺少足迹说明：${operation.getString("type")}")

@@ -6,15 +6,12 @@ import kotlin.math.*
 
 /** Versioned settings drive line prefiltering and seeded geodesic fill; output remains an explicit cached asset. */
 internal object ArtColorizeSolver {
-    data class Result(val bitmap: Bitmap,val x: Int,val y: Int,val filled: Int,val seeds: Int,val cleanup: ArtColorizeFilters.Cleanup)
+    data class Result(val bitmap: Bitmap,val x: Int,val y: Int,val filled: Int,val seeds: Int,val cleanup: ArtColorizeFilters.Cleanup,
+        val labels:IntArray,val scale:Int=1)
     fun workingBytes(mask:JSONObject,pixels:Long):Long {
         val options=ArtColorize.normalizeSettings(mask.getJSONObject("colorize").getJSONObject("settings"),JSONObject())
         val prefilter=(options.getBoolean("useEdgeDetection")&&options.getDouble("edgeDetectionSize")>0)||options.getDouble("fuzzyRadius")>0
-        return pixels*(64+(if(prefilter)24 else 0)+(if(options.getDouble("cleanUpAmount")>0)24 else 0))
-    }
-    private fun strength(pixel: Int): Int {
-        val light=(Color.red(pixel)*54+Color.green(pixel)*183+Color.blue(pixel)*19)/256
-        return (255-light)*Color.alpha(pixel)/255
+        return pixels*(104+(if(prefilter)24 else 0)+(if(options.getDouble("cleanUpAmount")>0)24 else 0))
     }
     fun region(state: JSONObject,source: Bitmap,mask: JSONObject): Rect {
         val w=source.width;val h=source.height
@@ -31,19 +28,23 @@ internal object ArtColorizeSolver {
         if(mask.getJSONObject("colorize").getJSONObject("settings").getBoolean("limitBounds")) {
             val content=Rect();var found=false
             fun include(x: Int,y: Int) {if(!found) {content.set(x,y,x+1,y+1);found=true} else content.union(x,y,x+1,y+1)}
-            val row=IntArray(w)
             for(y in bounds.top until bounds.bottom) {
-                source.getPixels(row,0,w,0,y,w,1)
-                for(x in bounds.left until bounds.right) if(strength(row[x])>=8)include(x,y)
+                val row=ArtFloatPixels.read(source,Rect(0,y,w,y+1))
+                for(x in bounds.left until bounds.right) if(ArtFloatPixels.darkness(row,x*4)>=8)include(x,y)
             }
             for(key in ArtColorize.items(mask).filterNot {it.getBoolean("erase")}) {
                 val points=key.getJSONArray("points");val half=key.getDouble("width")/2
+                val toDocument=if(mask.has("solverToDocument"))ArtShapes.matrix(mask.getJSONArray("solverToDocument")) else Matrix()
+                val saved=if(key.has("documentToLayer"))ArtShapes.matrix(key.getJSONArray("documentToLayer")) else Matrix()
+                val transform=Matrix().apply {setConcat(toDocument,saved)}
                 for(i in 0 until points.length()) {
                     val p=points.getJSONArray(i)
-                    val x=floor(p.getDouble(0)-half).toInt().coerceIn(bounds.left,bounds.right-1)
-                    val y=floor(p.getDouble(1)-half).toInt().coerceIn(bounds.top,bounds.bottom-1)
-                    val r=ceil(p.getDouble(0)+half).toInt().coerceIn(bounds.left+1,bounds.right)
-                    val b=ceil(p.getDouble(1)+half).toInt().coerceIn(bounds.top+1,bounds.bottom)
+                    val box=RectF((p.getDouble(0)-half).toFloat(),(p.getDouble(1)-half).toFloat(),
+                        (p.getDouble(0)+half).toFloat(),(p.getDouble(1)+half).toFloat());transform.mapRect(box)
+                    val x=floor(box.left.toDouble()).toInt().coerceIn(bounds.left,bounds.right-1)
+                    val y=floor(box.top.toDouble()).toInt().coerceIn(bounds.top,bounds.bottom-1)
+                    val r=ceil(box.right.toDouble()).toInt().coerceIn(bounds.left+1,bounds.right)
+                    val b=ceil(box.bottom.toDouble()).toInt().coerceIn(bounds.top+1,bounds.bottom)
                     include(x,y);include(r-1,b-1)
                 }
             }
@@ -54,8 +55,8 @@ internal object ArtColorizeSolver {
                 content.inset(-pad,-pad);content.intersect(bounds);bounds=content
             }
         }
-        require(bounds.width().toLong()*bounds.height()<=ArtColorize.MAX_PIXELS) {
-            "填色区域超过4194304像素，请启用图层边界限制或选择较小区域"
+        require(bounds.width().toLong()*bounds.height()<=ArtColorize.MAX_OUTPUT_PIXELS) {
+            "填色区域超过16777216像素，请启用图层边界限制或选择较小区域"
         }
         return bounds
     }
@@ -78,12 +79,13 @@ internal object ArtColorizeSolver {
         }
         return output
     }
-    fun solve(state: JSONObject,source: Bitmap,mask: JSONObject,area: Rect): Result {
+    fun solve(state: JSONObject,source: Bitmap,mask: JSONObject,area: Rect,priors:IntArray?=null): Result {
         val w=area.width();val h=area.height();val n=w*h
+        require(n<=ArtColorize.MAX_PIXELS && (priors==null || priors.size==n))
         ArtImagePolicy.requireBytes(workingBytes(mask,n.toLong()),"上色蒙版求解")
         val data=mask.getJSONObject("colorize");val settings=ArtColorize.normalizeSettings(data.getJSONObject("settings"),JSONObject())
-        val pixels=IntArray(n);source.getPixels(pixels,0,w,area.left,area.top,w,h)
-        val rawHeight=ByteArray(n) {strength(pixels[it]).toByte()}
+        val pixels=ArtFloatPixels.read(source,area)
+        val rawHeight=ByteArray(n) {ArtFloatPixels.darkness(pixels,it*4).toByte()}
         val height=ArtColorizeFilters.height(rawHeight,w,h,settings.getBoolean("useEdgeDetection"),
             settings.getDouble("edgeDetectionSize"),settings.getDouble("fuzzyRadius"))
         val threshold=settings.getInt("threshold")
@@ -103,6 +105,9 @@ internal object ArtColorizeSolver {
         try {keys.getPixels(keyPixels,0,w,0,0,w,h)} finally {keys.recycle()}
         val colors=ArtColorize.palette(mask)
         var seedCount=0
+        if(priors!=null)for(i in 0 until n)if(allowed[i] && priors[i] in colors.indices) {
+            labels[i]=priors[i];distances[i]=w+h
+        }
         for(i in 0 until n) {
             val label=Color.blue(keyPixels[i])-1
             if(allowed[i] && Color.alpha(keyPixels[i])==255 && label in colors.indices) {
@@ -119,7 +124,7 @@ internal object ArtColorizeSolver {
             if(p<0) {p=size++;heap[p]=pixel;positions[pixel]=p}
             while(p>0) {val parent=(p-1)/2;if(!less(heap[p],heap[parent]))break;swap(p,parent);p=parent}
         }
-        for(i in 0 until n)if(seeds[i]>=0)push(i)
+        for(i in 0 until n)if(labels[i]>=0)push(i)
         while(size>0) {
             if(Thread.currentThread().isInterrupted)error("上色蒙版求解已取消")
             val i=heap[0];positions[i]=-2;size--
@@ -142,17 +147,18 @@ internal object ArtColorizeSolver {
             if(x>0)visit(i-1);if(x+1<w)visit(i+1);if(y>0)visit(i-w);if(y+1<h)visit(i+w)
         }
         val cleanup=ArtColorizeFilters.cleanup(labels,seeds,w,h,settings.getDouble("cleanUpAmount"))
-        val output=IntArray(n);var filled=0
+        val output=FloatArray(n*4);var filled=0
         for(i in 0 until n) {
             val label=labels[i];if(label<0)continue
             val c=colors[label];if(c.getBoolean("transparent"))continue
-            val pixel=Color.parseColor(c.getString("color"))
+            val pixel=if(c.has("linearRGBA"))ArtFloatPixels.color(c.getJSONArray("linearRGBA")) else ArtFloatPixels.color(Color.parseColor(c.getString("color")))
             // Tint bright/transparent areas above the source. Dark line pixels remain visible.
-            val alpha=Color.alpha(pixel)*(255-(rawHeight[i].toInt() and 255))/255
-            output[i]=Color.argb(alpha,Color.red(pixel),Color.green(pixel),Color.blue(pixel));if(alpha>0)filled++
+            val amount=(255-(rawHeight[i].toInt() and 255))/255f
+            for(channel in 0..3)output[i*4+channel]=pixel[channel]*amount
+            if(output[i*4+3]>0)filled++
         }
-        val result=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888)
-        try {result.setPixels(output,0,w,0,0,w,h);return Result(result,area.left,area.top,filled,seedCount,cleanup)}
+        val result=ArtFloatPixels.bitmap(w,h)
+        try {ArtFloatPixels.write(result,output);return Result(result,area.left,area.top,filled,seedCount,cleanup,labels)}
         catch(error:Throwable) {result.recycle();throw error}
     }
 }
