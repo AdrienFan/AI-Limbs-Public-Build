@@ -42,4 +42,8 @@
 
 根因源码：[AOSP Android 10 Bitmap.cpp的imageInfo](https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r47/core/jni/android/graphics/Bitmap.cpp)。
 
+云端第72轮：F16修正后，API29已完成9项成功测试，覆盖16位PNG、HDR原生读写／EXR资源、原始half位元与局部读取、分组变换、上色动画／跨块、修补及工程归档匯出。第10项参数拒绝测试在越界矩形处使进程终止；剩余2项及API34未完成，不能视为通过。logcat明确记录`JNI GetLongField called with pending exception`：`Locked`析构在参数例外仍待处理时调用`AndroidBitmap_unlockPixels`，而Android 10的解锁内部需要JNI字段访问。
+
+修正原生资源清理：暂存同一个Throwable、清除线程待处理状态、解锁后重新抛出原例外；像素锁失败时保留平台原例外。参数拒绝不会变成成功。扩展Android用例核对越界、数组尺寸、非有限／超范围RGB和非法alpha的错误消息、内容不变及后续读写正常。待新云流程验证。参考[Android JNI例外处理规则](https://developer.android.com/ndk/guides/jni-tips#exceptions)。
+
 实现保持普通插件职责，没有新增宿主插件ID特判。Krita参考只用于交互及算法职责辨析；不引入Qt或Krita运行时。HDR依据Android RGBA_F16及OpenEXR公开格式实现。

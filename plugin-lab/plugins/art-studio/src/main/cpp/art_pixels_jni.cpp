@@ -5,7 +5,10 @@
 #include <cmath>
 
 namespace {
-void error(JNIEnv* e,const char* message) {e->ThrowNew(e->FindClass("java/lang/IllegalArgumentException"),message);}
+void error(JNIEnv* e,const char* message) {
+    auto type=e->FindClass("java/lang/IllegalArgumentException");
+    if(type) {e->ThrowNew(type,message);e->DeleteLocalRef(type);}
+}
 float unpack(uint16_t h) {
     uint32_t sign=(h&0x8000u)<<16,exponent=(h>>10)&31u,fraction=h&1023u,bits;
     if(exponent==0) {
@@ -44,9 +47,24 @@ struct Locked {
         int result=AndroidBitmap_getInfo(e,b,&info);if(e->ExceptionCheck())return;
         if(result!=ANDROID_BITMAP_RESULT_SUCCESS||info.width==0||info.height==0||
            uint64_t(info.stride)<uint64_t(info.width)*8||info.stride%sizeof(uint16_t)!=0) {error(e,"高位深位图尺寸或行跨度无效");return;}
-        if(AndroidBitmap_lockPixels(e,b,&pixels)!=ANDROID_BITMAP_RESULT_SUCCESS)error(e,"无法锁定高位深位图");
+        int locked=AndroidBitmap_lockPixels(e,b,&pixels);
+        if(locked!=ANDROID_BITMAP_RESULT_SUCCESS&&!e->ExceptionCheck())error(e,"无法锁定高位深位图");
     }
-    ~Locked() {if(pixels)AndroidBitmap_unlockPixels(env,image);}
+    ~Locked() {
+        if(!pixels)return;
+        // On API 29 unlockPixels calls JNI GetLongField, which is illegal with a
+        // pending exception. Suspend it only for cleanup, then rethrow the same
+        // Throwable (including allocation failures); invalid input still fails.
+        auto pending=env->ExceptionOccurred();
+        if(pending)env->ExceptionClear();
+        int unlocked=AndroidBitmap_unlockPixels(env,image);
+        if(pending) {
+            // A secondary cleanup exception is logged and cleared by Describe;
+            // retain the original failure as the exception returned to Kotlin.
+            if(env->ExceptionCheck())env->ExceptionDescribe();
+            env->Throw(pending);env->DeleteLocalRef(pending);
+        } else if(unlocked!=ANDROID_BITMAP_RESULT_SUCCESS&&!env->ExceptionCheck())error(env,"无法解锁高位深位图");
+    }
 };
 }
 extern "C" JNIEXPORT jfloatArray JNICALL

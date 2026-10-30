@@ -77,6 +77,31 @@ class ArtHdrPipelineAndroidTest {
             } finally {immutable.recycle()}
         } finally {image.recycle()}
     }
+    @Test fun nativeValidationErrorsPreserveMessagesAndReleasePixels() {
+        val expected=FloatArray(24) {floatArrayOf(4f,-.25f,2f,.5f)[it%4]}
+        val image=ArtFloatPixels.from(3,2,expected)
+        try {
+            // CheckJNI must survive each failure, and cleanup must leave the bitmap usable.
+            val bounds=assertThrows(IllegalArgumentException::class.java) {ArtNativePixels.read(image,2,1,2,1)}
+            assertEquals("像素读取矩形无效",bounds.message)
+            assertArrayEquals(expected,ArtFloatPixels.read(image),0f)
+            val size=assertThrows(IllegalArgumentException::class.java) {ArtNativePixels.write(image,FloatArray(4))}
+            assertEquals("像素数组尺寸无效",size.message)
+            assertArrayEquals(expected,ArtFloatPixels.read(image),0f)
+            for(value in listOf(Float.NaN,Float.POSITIVE_INFINITY,65505f)) {
+                val invalid=expected.copyOf().also {it[0]=value}
+                val range=assertThrows(IllegalArgumentException::class.java) {ArtNativePixels.write(image,invalid)}
+                assertEquals("像素超出有限RGBA_F16范围",range.message)
+                assertArrayEquals(expected,ArtFloatPixels.read(image),0f)
+            }
+            val alpha=assertThrows(IllegalArgumentException::class.java) {ArtNativePixels.write(image,expected.copyOf().also {it[3]=2f})}
+            assertEquals("像素超出有限RGBA_F16范围",alpha.message)
+            assertArrayEquals(expected,ArtFloatPixels.read(image),0f)
+            val changed=expected.copyOf().also {it[0]=8f}
+            ArtNativePixels.write(image,changed)
+            assertArrayEquals(changed,ArtFloatPixels.read(image),0f)
+        } finally {image.recycle()}
+    }
     @Test fun sixteenBitPngDecoderRetainsDifferencesBelowEightBitQuantization() {
         val bytes=InstrumentationRegistry.getInstrumentation().context.assets.open("hdr/reference-rgb16.png").use {it.readBytes()}
         val result=ArtImagePolicy.decode(bytes);val image=result.first
