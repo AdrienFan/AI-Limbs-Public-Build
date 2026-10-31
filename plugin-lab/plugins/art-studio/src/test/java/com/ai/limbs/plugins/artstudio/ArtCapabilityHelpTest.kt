@@ -7,7 +7,11 @@ import org.junit.Test
 
 class ArtCapabilityHelpTest {
     @Test fun everyExampleMatchesItsRegisteredParameterContract() {
-        assertEquals(267, ArtCapabilityHelp.names().size)
+        // v0.3.0 adds five filter entry points; the old count aborted before
+        // their examples could be checked against the registered contracts.
+        assertEquals(272, ArtCapabilityHelp.names().size)
+        assertTrue("missing filter entry-point help", ArtCapabilityHelp.names().containsAll(
+            setOf("menu.preview", "filter.catalog", "filter.resources", "filter.reference", "filter.hidden")))
         for (name in ArtCapabilityHelp.names()) {
             val fields = parametersFor(name)
             val example = ArtCapabilityHelp.example(name)

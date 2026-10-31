@@ -9,3 +9,9 @@
 提交前核对远端分支、版本一致性、能力与帮助清单及差异空白；只提交本轮版本和发布说明，保留已有0.2.99设备记录的未提交修改。本地不执行Gradle构建或运行测试。
 
 推送后确认本轮SHA对应的Art Studio构建记录已创建即可。构建结果与设备部署另行确认，不把任务排队表述为编译成功。
+
+## 首次云端验证修正
+
+2026-10-31，构建 41177294322 在 JVM 测试阶段失败：382 项用例中 381 项通过，唯一失败为 `ArtCapabilityHelpTest.everyExampleMatchesItsRegisteredParameterContract` 第10行，仍断言旧版267项能力。本轮新增 `menu.preview`、`filter.catalog`、`filter.resources`、`filter.reference`、`filter.hidden` 后已为272项，源码编译和能力声明静态核验均已通过。
+
+更新测试的清单预期为272，并明确断言以上五个入口均有帮助；其后的逐项参数、必填参数、类型与枚举校验继续完整执行。保留原测试流程，重新提交云端验证；不将此前源码编译通过等同于 APK 打包或设备测试通过。
