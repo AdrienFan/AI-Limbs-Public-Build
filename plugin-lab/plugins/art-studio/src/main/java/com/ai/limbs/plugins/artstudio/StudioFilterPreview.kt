@@ -33,6 +33,7 @@ internal fun StudioFilterPreview(request:Map<String,String>, arguments:()->JSONO
         view.setImageDrawable(null);image?.recycle();image=null
         // Parse on the UI thread: the background worker never reads Compose's mutable map.
         val parsed=try {arguments()} catch(error:IllegalArgumentException) {message=error.message ?: "参数无效";null}
+            catch(error:org.json.JSONException) {message="JSON格式无效：${error.message}";null}
         val task=if(parsed==null)null else executor.submit {
             var result:Bitmap?=null
             try {

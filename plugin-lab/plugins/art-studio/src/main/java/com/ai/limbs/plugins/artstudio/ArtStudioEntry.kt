@@ -106,6 +106,9 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("menu.catalog", "读取画室完整菜单清单", read) {
             ArtStudioMenuCatalog.describe(store.menuContext())
         }
+        capability("filter.catalog", "查询滤镜参数及兰儿的预览／应用调用格式", read) { p ->
+            ArtStudioMenuCatalog.filters(store.menuContext(),if(p.has("action"))p.getString("action") else null)
+        }
         capability("menu.preview", "只读预览当前图层的滤镜结果", read) { p ->
             val arguments=JSONObject(p.optJSONObject("parameters")?.toString() ?: "{}")
                 .put("documentId",p.getString("documentId")).put("expectedRevision",p.getInt("expectedRevision"))
@@ -791,6 +794,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             p("textPath","object",true),p("shapeInside","object",true),p("clearGeometry","boolean",true),
             p("x", "number", true), p("y", "number", true)) + if (name == "text.update") listOf(id) else emptyList()
         "menu.preview" -> listOf(p("action"),p("parameters","object",true),p("documentId"),p("expectedRevision","integer"),p("maxEdge","integer",true))
+        "filter.catalog" -> listOf(p("action",optional=true))
         "menu.execute" -> listOf(p("action"), p("parameters", "object", true),
             p("documentId", optional = true), p("expectedRevision", "integer", true))
         "image.set_background" -> listOf(p("color"))

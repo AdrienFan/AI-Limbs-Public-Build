@@ -72,4 +72,56 @@ class ArtMenuFilterAndroidTest {
         s=store.animationSeek("AWEI",request(s).put("frame",0))
         assertArrayEquals(zero,pixels(s),0f)
     }
+    @Test fun structuredCurvePreviewCommitRepeatAndUndoUseSameConfiguration() {
+        val s=seeded();val before=pixels(s)
+        val config=JSONObject("{\"red\":[[0,0],[1,2]],\"alpha\":[[0,0],[1,0.5]]}")
+        val p=request(s).put("curves",config).put("space","linear")
+        val preview=store.previewMenuBitmap("filter.color_adjustment_curves",p);preview.recycle()
+        assertEquals(s.getInt("revision"),store.menuContext().getJSONObject("document").getInt("revision"))
+        val changed=store.executeMenu("LANER","filter.color_adjustment_curves",p)
+        val previous=changed.getJSONObject("state").getJSONObject("lastFilter")
+        assertEquals(2.0,previous.getJSONObject("parameters").getJSONObject("curves").getJSONArray("red").getJSONArray(1).getDouble(1),0.0)
+        assertEquals(s.getInt("revision")+1,changed.getInt("revision"))
+        val once=pixels(changed)
+        assertEquals(16f,once[0]/once[3],.02f);assertEquals(.5f,once[3],.001f)
+        val repeated=store.executeMenu("LANER","filter_apply_again",request(changed))
+        val twice=pixels(repeated)
+        assertEquals(32f,twice[0]/twice[3],.04f);assertEquals(.25f,twice[3],.001f)
+        assertArrayEquals(once,pixels(store.history("LANER",true)),0f)
+        assertArrayEquals(before,pixels(store.history("LANER",true)),0f)
+    }
+    @Test fun colorFilterHonorsSelectionAndInvalidNestedConfigCannotWrite() {
+        val source=floatArrayOf(.5f,.5f,.5f,1f, .5f,.5f,.5f,1f)
+        val bitmap=ArtFloatPixels.from(2,1,source)
+        try {
+            val selection=JSONObject().put("shape","rect").put("x",1).put("y",0).put("width",1).put("height",1)
+            ArtMenuOperations.filter(bitmap,"filter.fast_color_overlay",JSONObject().put("color","#FFFF0000").put("space","linear"),selection)
+            val out=ArtFloatPixels.read(bitmap)
+            assertArrayEquals(source.copyOfRange(0,4),out.copyOfRange(0,4),0f)
+            assertArrayEquals(floatArrayOf(1f,0f,0f,1f),out.copyOfRange(4,8),.001f)
+        } finally {bitmap.recycle()}
+        val s=seeded();val before=File(directory,"assets").list()?.toSet()
+        assertThrows(IllegalArgumentException::class.java) {
+            store.executeMenu("LANER","filter.levels",request(s).put("levels",JSONObject("{\"master\":{\"typo\":0.1}}")))
+        }
+        assertEquals(s.getInt("revision"),store.menuContext().getJSONObject("document").getInt("revision"))
+        assertEquals(before,File(directory,"assets").list()?.toSet())
+    }
+    @Test fun filterDiscoveryIncludesSharedCallsAndReportsUnavailableEntries() {
+        val s=seeded()
+        val catalog=ArtStudioMenuCatalog.filters(store.menuContext(),"filter.cross_channel_adjustment_curves")
+        assertFalse(catalog.getBoolean("historyWritten"))
+        val entry=catalog.getJSONArray("filters").getJSONObject(0)
+        assertTrue(entry.getBoolean("enabled"))
+        val calls=entry.getJSONObject("calls")
+        assertEquals("plugin.art.studio.menu.preview",calls.getJSONObject("preview").getString("capabilityId"))
+        assertEquals("plugin.art.studio.menu.execute",calls.getJSONObject("apply").getString("capabilityId"))
+        val args=calls.getJSONObject("apply").getJSONObject("parameters")
+        assertEquals(s.getString("id"),args.getString("documentId"))
+        assertEquals(s.getInt("revision"),args.getInt("expectedRevision"))
+        val rules=args.getJSONObject("parameters").getJSONArray("rules")
+        assertEquals(.5,rules.getJSONObject(0).getJSONArray("points").getJSONArray(0).getDouble(1),0.0)
+        val absent=ArtStudioMenuCatalog.filters(store.menuContext(),"filter.color_transfer").getJSONArray("filters").getJSONObject(0)
+        assertFalse(absent.getBoolean("implemented"));assertFalse(absent.has("calls"))
+    }
 }

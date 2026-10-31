@@ -97,6 +97,8 @@ internal fun StudioMenuParameters(item: JSONObject, initial: JSONObject,
                     "integer" -> value.toInt()
                     "number" -> value.toDouble().also { require(it.isFinite()) }
                     "boolean" -> value.toBooleanStrict()
+                    "array" -> JSONArray(value)
+                    "object" -> JSONObject(value)
                     else -> value.trim().also { require(field.optBoolean("allowBlank") || it.isNotBlank()) { "请填写 ${field.getString("description")}" } }
                 })
             }
@@ -123,8 +125,13 @@ internal fun StudioMenuParameters(item: JSONObject, initial: JSONObject,
                         val choice=choices.getString(c)
                         TextButton(onClick={values[key]=choice}) { Text((if(values[key]==choice) "✓ " else "")+choice) }
                     }
-                } else OutlinedTextField(value=values.getValue(key),onValueChange={values[key]=it;error=null},
-                    label={Text(field.getString("description"))},singleLine=true,modifier=Modifier.fillMaxWidth())
+                } else {
+                    if(key in setOf("curves","rules")) StudioFilterCurves(key,values.getValue(key),
+                        values["interpolation"] ?: "smooth") {values[key]=it;error=null}
+                    OutlinedTextField(value=values.getValue(key),onValueChange={values[key]=it;error=null},
+                        label={Text(field.getString("description"))},
+                        singleLine=field.getString("type") !in setOf("array","object"),modifier=Modifier.fillMaxWidth())
+                }
             }
             error?.let { Text(it,color=MaterialTheme.colorScheme.error) }
         }
@@ -132,6 +139,7 @@ internal fun StudioMenuParameters(item: JSONObject, initial: JSONObject,
         try {
             onExecute(arguments())
         } catch(e:IllegalArgumentException) { error=e.message ?: "参数格式无效" }
+        catch(e:org.json.JSONException) { error="JSON格式无效：${e.message}" }
     }) {Text("确定")} }, dismissButton={TextButton(onClick=onDismiss){Text("取消")}})
 }
 

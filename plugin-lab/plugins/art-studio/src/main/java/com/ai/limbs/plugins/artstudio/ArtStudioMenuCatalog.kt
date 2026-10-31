@@ -1044,23 +1044,190 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.hsv_adjustment",
           "title": "HSV 调整…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/colorsfilters/kis_hsv_adjustment_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "hue",
+              "type": "number",
+              "description": "色相偏移角度−360–360；着色模式为绝对色相",
+              "default": 0
+            },
+            {
+              "name": "saturation",
+              "type": "number",
+              "description": "饱和度调整−1–1；着色模式为0–1绝对值",
+              "default": 0
+            },
+            {
+              "name": "value",
+              "type": "number",
+              "description": "HSV明度或HSL亮度调整−1–1",
+              "default": 0
+            },
+            {
+              "name": "model",
+              "type": "string",
+              "description": "颜色模型",
+              "default": "hsv",
+              "choices": [
+                "hsv",
+                "hsl"
+              ]
+            },
+            {
+              "name": "colorize",
+              "type": "boolean",
+              "description": "着色模式",
+              "default": false
+            },
+            {
+              "name": "clipInput",
+              "type": "boolean",
+              "description": "明确允许将工作域RGB裁到0–1",
+              "default": false
+            },
+            {
+              "name": "space",
+              "type": "string",
+              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
+              "default": "srgb",
+              "choices": [
+                "linear",
+                "srgb"
+              ]
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "支持HSV/HSL；不包含Krita的HSI、HSY、YUV和旧兼容模式。非中性调整要求工作域RGB在0–1内；越界时明确拒绝，或由clipInput显式裁切。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
         {
           "id": "filter.dodge",
           "title": "减淡…",
-          "implemented": false,
-          "source": "plugins/filters",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "implemented": true,
+          "source": "plugins/filters/dodgeburn/DodgeBurn.cpp",
+          "parameters": [
+            {
+              "name": "range",
+              "type": "string",
+              "description": "作用范围",
+              "default": "midtones",
+              "choices": [
+                "shadows",
+                "midtones",
+                "highlights"
+              ]
+            },
+            {
+              "name": "exposure",
+              "type": "number",
+              "description": "曝光量0–1",
+              "default": 0.5
+            },
+            {
+              "name": "space",
+              "type": "string",
+              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
+              "default": "srgb",
+              "choices": [
+                "linear",
+                "srgb"
+              ]
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "按Krita的阴影／中间调／高光公式处理；中间调幂运算要求工作域RGB非负。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
         {
           "id": "filter.burn",
           "title": "加深…",
-          "implemented": false,
-          "source": "plugins/filters",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "implemented": true,
+          "source": "plugins/filters/dodgeburn/DodgeBurn.cpp",
+          "parameters": [
+            {
+              "name": "range",
+              "type": "string",
+              "description": "作用范围",
+              "default": "midtones",
+              "choices": [
+                "shadows",
+                "midtones",
+                "highlights"
+              ]
+            },
+            {
+              "name": "exposure",
+              "type": "number",
+              "description": "曝光量0–1",
+              "default": 0.5
+            },
+            {
+              "name": "space",
+              "type": "string",
+              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
+              "default": "srgb",
+              "choices": [
+                "linear",
+                "srgb"
+              ]
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "按Krita的阴影／中间调／高光公式处理；中间调幂运算要求工作域RGB非负，阴影公式裁限负输出。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
         {
           "id": "filter.desaturate",
@@ -1096,37 +1263,339 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.slope_offset_power",
           "title": "斜率、偏移、幂 (ASC-CDL)…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/asccdl/kis_asccdl_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "slope",
+              "type": "array",
+              "description": "RGB斜率数组，3项−16–16",
+              "default": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "name": "offset",
+              "type": "array",
+              "description": "RGB偏移数组，3项−16–16",
+              "default": [
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "name": "power",
+              "type": "array",
+              "description": "RGB幂数组，3项0.01–16",
+              "default": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "name": "space",
+              "type": "string",
+              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
+              "default": "srgb",
+              "choices": [
+                "linear",
+                "srgb"
+              ]
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "依次执行pow(RGB×slope+offset,power)。负底数与分数次幂组合明确拒绝；不自动裁切HDR。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
         {
           "id": "filter.auto_contrast",
           "title": "自动对比度…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/colorsfilters/colorsfilters.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "percentile",
+              "type": "number",
+              "description": "直方图两端各裁去的百分比0–49",
+              "default": 0.5
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "以本层全部非透明像素统计4096档D65 Lab明度；拉伸后再以选区混合输出，非选区专属统计。不是Krita的ICC Lab变换；统计明度限制0–100，平坦图保持原值。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
         {
           "id": "filter.color_balance",
           "title": "色彩平衡…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/colorsfilters/kis_color_balance_filter.cpp",
-          "reason": "尚缺对应色彩空间/色彩管理模型"
+          "parameters": [
+            {
+              "name": "shadows",
+              "type": "array",
+              "description": "阴影RGB偏移数组，3项−1–1",
+              "default": [
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "name": "midtones",
+              "type": "array",
+              "description": "中间调RGB偏移数组，3项−1–1",
+              "default": [
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "name": "highlights",
+              "type": "array",
+              "description": "高光RGB偏移数组，3项−1–1",
+              "default": [
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "name": "preserveLuminosity",
+              "type": "boolean",
+              "description": "保留HSL亮度",
+              "default": true
+            },
+            {
+              "name": "clipInput",
+              "type": "boolean",
+              "description": "明确允许将工作域RGB裁到0–1",
+              "default": false
+            },
+            {
+              "name": "space",
+              "type": "string",
+              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
+              "default": "srgb",
+              "choices": [
+                "linear",
+                "srgb"
+              ]
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "使用Krita的分段权重和HSL亮度恢复；实际调整要求0–1工作域并将结果裁到0–1。尚无ICC色彩空间变换。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
         {
           "id": "filter.levels",
           "title": "色阶…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/levelfilter/KisLevelsFilter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "levels",
+              "type": "object",
+              "description": "色阶对象：master/red/green/blue/alpha各含black、white、gamma、outBlack、outWhite",
+              "default": {
+                "master": {
+                  "black": 0,
+                  "white": 1,
+                  "gamma": 1,
+                  "outBlack": 0,
+                  "outWhite": 1
+                }
+              }
+            },
+            {
+              "name": "mode",
+              "type": "string",
+              "description": "处理模式：channels为RGB，lightness为D65 Lab明度",
+              "default": "channels",
+              "choices": [
+                "channels",
+                "lightness"
+              ]
+            },
+            {
+              "name": "clipInput",
+              "type": "boolean",
+              "description": "把每级色阶的归一化输入裁到0–1",
+              "default": false
+            },
+            {
+              "name": "space",
+              "type": "string",
+              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
+              "default": "srgb",
+              "choices": [
+                "linear",
+                "srgb"
+              ]
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝通道",
+              "default": true
+            },
+            {
+              "name": "alpha",
+              "type": "boolean",
+              "description": "处理透明度通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "white必须大于black；gamma为0.01–100，其余色阶值−16–16。不裁切时采用带符号幂延展HDR；alpha始终裁到0–1。明度模式仅接受master/alpha，不是Krita ICC Lab模式。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
         {
           "id": "filter.cross_channel_adjustment_curves",
           "title": "跨通道调整曲线…",
-          "implemented": false,
-          "source": "plugins/filters",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "implemented": true,
+          "source": "plugins/filters/colorsfilters/kis_cross_channel_filter.cpp",
+          "parameters": [
+            {
+              "name": "rules",
+              "type": "array",
+              "description": "按顺序执行的规则数组：driver、target、points",
+              "default": [
+                {
+                  "driver": "red",
+                  "target": "green",
+                  "points": [
+                    [
+                      0,
+                      0.5
+                    ],
+                    [
+                      1,
+                      0.5
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "interpolation",
+              "type": "string",
+              "description": "曲线插值：smooth为保形三次Hermite",
+              "default": "smooth",
+              "choices": [
+                "linear",
+                "smooth"
+              ]
+            },
+            {
+              "name": "clipInput",
+              "type": "boolean",
+              "description": "明确允许将工作域RGB裁到0–1",
+              "default": false
+            },
+            {
+              "name": "space",
+              "type": "string",
+              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
+              "default": "srgb",
+              "choices": [
+                "linear",
+                "srgb"
+              ]
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝通道",
+              "default": true
+            },
+            {
+              "name": "alpha",
+              "type": "boolean",
+              "description": "处理透明度通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "最多16条规则；driver=red/green/blue/alpha/hue/saturation/value/luminance，target另可master。points为2–32个[x,y]节点，端点x=0/1，y为−16–16。增量=2×curve(driver)−1，0.5恒定曲线为中性；越界driver取端值。luminance为所选工作域的Rec.709加权值，target luminance等量加RGB；HSV分支要求0–1。规则按给定顺序执行，不冒用Krita的虚拟通道顺序。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
         {
           "id": "filter.threshold",
@@ -1146,9 +1615,83 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.color_adjustment_curves",
           "title": "颜色调整曲线…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters",
-          "reason": "尚缺对应色彩空间/色彩管理模型"
+          "parameters": [
+            {
+              "name": "curves",
+              "type": "object",
+              "description": "曲线对象：master/red/green/blue/alpha -> [[x,y],…]",
+              "default": {
+                "master": [
+                  [
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ]
+              }
+            },
+            {
+              "name": "interpolation",
+              "type": "string",
+              "description": "曲线插值：smooth为保形三次Hermite",
+              "default": "smooth",
+              "choices": [
+                "linear",
+                "smooth"
+              ]
+            },
+            {
+              "name": "outside",
+              "type": "string",
+              "description": "HDR区间外处理",
+              "default": "linear",
+              "choices": [
+                "linear",
+                "constant"
+              ]
+            },
+            {
+              "name": "space",
+              "type": "string",
+              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
+              "default": "srgb",
+              "choices": [
+                "linear",
+                "srgb"
+              ]
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝通道",
+              "default": true
+            },
+            {
+              "name": "alpha",
+              "type": "boolean",
+              "description": "处理透明度通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "每条曲线2–32节点，x严格递增且含0/1端点，y为−16–16。master先于RGB单通道；alpha独立且输出裁到0–1。图形编辑支持y为0–1，其余可直接编辑JSON。插值不是Krita的样条实现。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         }
       ]
     },
@@ -1427,9 +1970,68 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.fast_color_overlay",
           "title": "快速颜色叠加…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/colors/KisFilterFastColorOverlay.cpp",
-          "reason": "尚缺对应色彩空间/色彩管理模型"
+          "parameters": [
+            {
+              "name": "color",
+              "type": "string",
+              "description": "叠加色#AARRGGBB",
+              "default": "#FFFFFFFF"
+            },
+            {
+              "name": "opacity",
+              "type": "number",
+              "description": "叠加不透明度0–1",
+              "default": 1
+            },
+            {
+              "name": "blend",
+              "type": "string",
+              "description": "叠加混合模式",
+              "default": "normal",
+              "choices": [
+                "normal",
+                "multiply",
+                "screen",
+                "overlay",
+                "darken",
+                "lighten",
+                "add",
+                "difference"
+              ]
+            },
+            {
+              "name": "space",
+              "type": "string",
+              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
+              "default": "srgb",
+              "choices": [
+                "linear",
+                "srgb"
+              ]
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "仅提供列出的8种混合模式；颜色透明度×opacity控制强度，保留原像素alpha。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
         {
           "id": "filter.propagate_colors",
@@ -1457,9 +2059,58 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.color_to_alpha",
           "title": "颜色转透明度…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/colors/kis_color_to_alpha.cpp",
-          "reason": "尚缺像素选区/蒙版模型与对应算法"
+          "parameters": [
+            {
+              "name": "color",
+              "type": "string",
+              "description": "目标RGB色#AARRGGBB；此滤镜忽略色值中的alpha",
+              "default": "#FFFFFFFF"
+            },
+            {
+              "name": "tolerance",
+              "type": "number",
+              "description": "工作域RGB最大分量色差阈值，大于0且不超过1",
+              "default": 1
+            },
+            {
+              "name": "space",
+              "type": "string",
+              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
+              "default": "linear",
+              "choices": [
+                "linear",
+                "srgb"
+              ]
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝通道",
+              "default": true
+            },
+            {
+              "name": "alpha",
+              "type": "boolean",
+              "description": "处理透明度通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "透明度乘以min(max(abs(RGB−目标色))/tolerance,1)，反合成恢复RGB。默认在线性光下保留叠回目标底色的结果；不是Krita的ICC色差度量。srgb模式在编码域反合成。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
         {
           "id": "filter.color_transfer",
@@ -1895,16 +2546,111 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.normalize",
           "title": "归一化…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/normalize/kis_normalize.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "法线贴图归一化：在线性RGB数据上将2×RGB−1作为向量，归一化后映回0–1；零向量输出(0.5,0.5,0.5)。保留alpha；不是亮度拉伸。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
         {
           "id": "filter.gradient_map",
           "title": "渐变映射…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/gradientmap/KisGradientMapFilter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "stops",
+              "type": "array",
+              "description": "渐变节点数组：position与线性直通rgba；2–16项",
+              "default": [
+                {
+                  "position": 0,
+                  "rgba": [
+                    0,
+                    0,
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "position": 1,
+                  "rgba": [
+                    1,
+                    1,
+                    1,
+                    1
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "inputBlack",
+              "type": "number",
+              "description": "输入线性亮度黑点−65504–65504",
+              "default": 0
+            },
+            {
+              "name": "inputWhite",
+              "type": "number",
+              "description": "输入线性亮度白点；必须大于黑点",
+              "default": 1
+            },
+            {
+              "name": "space",
+              "type": "string",
+              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
+              "default": "linear",
+              "choices": [
+                "linear",
+                "srgb"
+              ]
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝通道",
+              "default": true
+            },
+            {
+              "name": "alpha",
+              "type": "boolean",
+              "description": "处理透明度通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "position严格递增且含0/1端点；rgba的RGB为有限线性HDR值±65504，alpha为0–1。以线性Rec.709亮度取样，在所选工作域预乘插值，渐变alpha乘原alpha。当前使用显式节点与平滑插值，不接资源库、最近色和抖动模式；alpha相乘与Krita取两者最小值的规则不同。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
         {
           "id": "filter.palettize",
@@ -2603,6 +3349,44 @@ internal object ArtStudioMenuCatalog {
             .put("revision",doc?.getInt("revision") ?: JSONObject.NULL)
             .put("mutationProtocol","documentWrite=true 的项目必须携带 documentId 与 expectedRevision；灰色项目没有执行入口")
     }
+    /** Narrow discovery for Laner: the menu definition remains the only parameter contract. */
+    fun filters(context:JSONObject,action:String?=null):JSONObject {
+        val menu=describe(context)
+        val filters=JSONArray()
+        val doc=context.optJSONObject("document")
+        fun collect(items:JSONArray,group:String) {
+            for(i in 0 until items.length()) {
+                val item=items.getJSONObject(i)
+                val children=item.optJSONArray("children")
+                if(children!=null)collect(children,item.getString("title"))
+                else if(item.optString("id").startsWith("filter.") && (action==null || item.getString("id")==action)) {
+                    val entry=JSONObject(item.toString()).put("group",group)
+                    if(item.getBoolean("implemented")) {
+                        val defaults=JSONObject()
+                        val specs=item.getJSONArray("parameters")
+                        for(j in 0 until specs.length()) {
+                            val field=specs.getJSONObject(j)
+                            if(field.has("default"))defaults.put(field.getString("name"),field.get("default"))
+                        }
+                        val args=JSONObject().put("action",item.getString("id")).put("parameters",defaults)
+                            .put("documentId",doc?.getString("id") ?: "DOCUMENT_ID")
+                            .put("expectedRevision",doc?.getInt("revision") ?: 0)
+                        entry.put("calls",JSONObject()
+                            .put("preview",JSONObject().put("capabilityId","plugin.art.studio.menu.preview")
+                                .put("parameters",JSONObject(args.toString()).put("maxEdge",512)))
+                            .put("apply",JSONObject().put("capabilityId","plugin.art.studio.menu.execute")
+                                .put("parameters",JSONObject(args.toString()))))
+                    }
+                    filters.put(entry)
+                }
+            }
+        }
+        collect(menu.getJSONArray("menus"),"")
+        require(action==null || filters.length()==1) {"未知具体滤镜：$action"}
+        return JSONObject().put("filters",filters).put("documentId",menu.get("documentId"))
+            .put("revision",menu.get("revision")).put("historyWritten",false)
+            .put("usage","implemented表示本插件有声明参数范围内的实现，并非Krita全部模式或ICC等价；先读notice和参数说明。enabled=false时刷新工程或处理unavailableReason。calls含默认参数模板，可直接替换参数；无工程时DOCUMENT_ID/0仅为占位。预览只读，确认使用相同documentId/expectedRevision执行；成功后重新读取修订。")
+    }
     fun help(action:String,context:JSONObject):JSONObject = when(action) {
         "buginfo","sysinfo" -> JSONObject().put("pluginVersion",VERSION).put("androidRelease",Build.VERSION.RELEASE)
             .put("sdk",Build.VERSION.SDK_INT).put("manufacturer",Build.MANUFACTURER).put("model",Build.MODEL)
@@ -2611,9 +3395,9 @@ internal object ArtStudioMenuCatalog {
                 .put("revision",snap.getInt("revision")).put("width",snap.getJSONObject("state").getInt("width"))
                 .put("height",snap.getJSONObject("state").getInt("height")) } ?: JSONObject.NULL)
         "help_about_app" -> JSONObject().put("title","AI Limbs 画室 $VERSION")
-            .put("text","阿伟与兰儿共用工程、图层和操作历史。菜单参考 Krita 6.0.4；当前使用画室自己的 RGB 8 位工程与 Android 渲染，不含 Krita/Qt 引擎。")
+            .put("text","阿伟与兰儿共用工程、图层和操作历史。菜单参考 Krita 6.0.4；当前使用画室自己的线性浮点 RGBA 工程与 Android 渲染；菜单滤镜的工作域和限制见 filter.catalog，不含 Krita/Qt 引擎。")
         "help_whats_this" -> JSONObject().put("title","这是什么？").put("text","画布工具记录可撤销操作；右侧足迹可切换历史状态。菜单灰色表示当前不可执行，menu.catalog 返回具体原因。图层、笔刷和拾色器面板共用同一工程。")
         "help_show_tip" -> JSONObject().put("title","画室提示").put("text","协作编辑前先读取工程 revision；兰儿菜单写操作携带 documentId 与 expectedRevision，避免把阿伟的新修改覆盖掉。右侧足迹可恢复合并或滤镜之前的状态。")
-        else -> JSONObject().put("title","画室手册").put("text","新建或打开工程后，通过左侧工具作画，右侧管理图层与足迹。文件→保存写入 .ailart；导出写入 PNG/JPEG。图层剪贴板复制完整图层树，与编辑菜单的像素剪贴板分开。基础滤镜作用于当前可编辑根图层并遵循选区。兰儿使用 menu.catalog 发现动作和参数，再通过 menu.execute 执行同一个动作。")
+        else -> JSONObject().put("title","画室手册").put("text","新建或打开工程后，通过左侧工具作画，右侧管理图层与足迹。文件→保存写入 .ailart；导出写入 PNG/JPEG。图层剪贴板复制完整图层树，与编辑菜单的像素剪贴板分开。基础滤镜作用于当前可编辑根图层并遵循选区。兰儿使用 filter.catalog 查询滤镜及结构化参数，通过 menu.preview 只读预览，再以同一工程修订调用 menu.execute；其他菜单由 menu.catalog 查询。")
     }
 }

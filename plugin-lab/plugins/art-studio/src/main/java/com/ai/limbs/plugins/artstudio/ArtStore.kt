@@ -803,6 +803,8 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                 "boolean" -> value is Boolean
                 "integer" -> value is Number && value.toDouble().isFinite() && value.toDouble()==value.toLong().toDouble()
                 "number" -> value is Number && value.toDouble().isFinite()
+                "array" -> value is JSONArray
+                "object" -> value is JSONObject
                 else -> false
             }) { "菜单参数类型无效：$key" }
             field.optJSONArray("choices")?.let { choices ->
@@ -1078,6 +1080,9 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             }
             "filter.invert", "filter.desaturate", "filter.threshold", "filter.posterize", "filter.maximize",
             "filter.minimize", "filter.resettransparent",
+            "filter.hsv_adjustment", "filter.dodge", "filter.burn", "filter.slope_offset_power",
+            "filter.auto_contrast", "filter.color_balance", "filter.levels", "filter.cross_channel_adjustment_curves",
+            "filter.color_adjustment_curves", "filter.fast_color_overlay", "filter.color_to_alpha", "filter.normalize", "filter.gradient_map",
             "filter.gaussian_blur", "filter.blur", "filter.motion_blur", "filter.lens_blur", "filter.sharpen", "filter.mean_removal", "filter.unsharp_mask", "filter.gaussian_high_pass", "filter.emboss_laplacian", "filter.emboss_in_all_directions", "filter.emboss_horizontal_vertical", "filter.emboss_vertical_only", "filter.emboss_horizontal_only", "filter.top_edge_detection", "filter.emboss_with_variable_depth" ->
                 applyMenuFilter(actor,action,p,requireNotNull(snap),item.getString("title"),::raster,::change)
             "art.storage_directory" -> saveDirectories.setDirectory(p.getString("directory"))
