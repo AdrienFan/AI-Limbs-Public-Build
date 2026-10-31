@@ -106,6 +106,11 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("menu.catalog", "读取画室完整菜单清单", read) {
             ArtStudioMenuCatalog.describe(store.menuContext())
         }
+        capability("menu.preview", "只读预览当前图层的滤镜结果", read) { p ->
+            val arguments=JSONObject(p.optJSONObject("parameters")?.toString() ?: "{}")
+                .put("documentId",p.getString("documentId")).put("expectedRevision",p.getInt("expectedRevision"))
+            store.previewMenuFilter(p.getString("action"),arguments,p.optInt("maxEdge",512))
+        }
         capability("menu.execute", "执行画室菜单操作", write) { p ->
             val arguments = p.optJSONObject("parameters")?.let { JSONObject(it.toString()) } ?: JSONObject()
             if (p.has("documentId")) arguments.put("documentId",p.getString("documentId"))
@@ -785,6 +790,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             p("writingMode",optional=true),p("textOrientation",optional=true),p("direction",optional=true),
             p("textPath","object",true),p("shapeInside","object",true),p("clearGeometry","boolean",true),
             p("x", "number", true), p("y", "number", true)) + if (name == "text.update") listOf(id) else emptyList()
+        "menu.preview" -> listOf(p("action"),p("parameters","object",true),p("documentId"),p("expectedRevision","integer"),p("maxEdge","integer",true))
         "menu.execute" -> listOf(p("action"), p("parameters", "object", true),
             p("documentId", optional = true), p("expectedRevision", "integer", true))
         "image.set_background" -> listOf(p("color"))

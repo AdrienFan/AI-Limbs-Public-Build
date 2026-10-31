@@ -169,6 +169,7 @@
       "plugin.art.studio.image.resize_canvas",
       "plugin.art.studio.image.crop_to_selection",
       "plugin.art.studio.menu.catalog",
+      "plugin.art.studio.menu.preview",
       "plugin.art.studio.menu.execute",
       "plugin.art.studio.storage.settings",
       "plugin.art.studio.storage.set_directory",

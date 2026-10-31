@@ -767,15 +767,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             .put("brushWidth", 6.0).put("brushOpacity", 1.0).put("selectionVisible", true)
             .put("panelsHidden", false).put("gridVisible", false).put("pixelGridVisible", true)
 
-    /** The same dispatcher is called by the popup menus and Laner's registered capability. */
-    fun executeMenu(actor: String, action: String, arguments: JSONObject): JSONObject = locked {
-        require(actor in setOf("AWEI", "LANER"))
-        val context = JSONObject().put("document", if (pointer.isFile) snapshot(loadCurrent()) else JSONObject.NULL)
-            .put("layerClipboard", layerClipboard.isFile).put("settings", readMenuSettings())
-            .put("storage", saveDirectories.describe())
-        val item = ArtStudioMenuCatalog.find(action) ?: error("未知菜单操作：$action")
-        val availability = ArtStudioMenuCatalog.availability(item, context)
-        require(availability.first) { availability.second }
+    private fun menuArguments(action:String, arguments:JSONObject, context:JSONObject, item:JSONObject):JSONObject {
         val p = JSONObject(arguments.toString())
         var fields=item.getJSONArray("parameters")
         if(action=="filter_apply_reprompt") {
@@ -825,6 +817,19 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                 "工程或修订已经被另一端修改，请刷新后重试"
             }
         }
+        return p
+    }
+
+    /** The same dispatcher is called by the popup menus and Laner's registered capability. */
+    fun executeMenu(actor: String, action: String, arguments: JSONObject): JSONObject = locked {
+        require(actor in setOf("AWEI", "LANER"))
+        val context = JSONObject().put("document", if (pointer.isFile) snapshot(loadCurrent()) else JSONObject.NULL)
+            .put("layerClipboard", layerClipboard.isFile).put("settings", readMenuSettings())
+            .put("storage", saveDirectories.describe())
+        val item = ArtStudioMenuCatalog.find(action) ?: error("未知菜单操作：$action")
+        val availability = ArtStudioMenuCatalog.availability(item, context)
+        require(availability.first) { availability.second }
+        val p = menuArguments(action,arguments,context,item)
         val snap = context.optJSONObject("document")
         val state = snap?.getJSONObject("state")
         val active = state?.let { ArtMenuOperations.active(it) }
@@ -1072,7 +1077,8 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                     item.getString("title"), ::raster, ::change)
             }
             "filter.invert", "filter.desaturate", "filter.threshold", "filter.posterize", "filter.maximize",
-            "filter.minimize", "filter.resettransparent" ->
+            "filter.minimize", "filter.resettransparent",
+            "filter.gaussian_blur", "filter.blur", "filter.motion_blur", "filter.lens_blur", "filter.sharpen", "filter.mean_removal", "filter.unsharp_mask", "filter.gaussian_high_pass", "filter.emboss_laplacian", "filter.emboss_in_all_directions", "filter.emboss_horizontal_vertical", "filter.emboss_vertical_only", "filter.emboss_horizontal_only", "filter.top_edge_detection", "filter.emboss_with_variable_depth" ->
                 applyMenuFilter(actor,action,p,requireNotNull(snap),item.getString("title"),::raster,::change)
             "art.storage_directory" -> saveDirectories.setDirectory(p.getString("directory"))
             "options_configure", "reset_configurations", "toggle_display_selection", "view_toggledockers" -> {
@@ -1106,6 +1112,48 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                 ArtStudioMenuCatalog.help(action,context)
             else -> error("菜单尚未实现：$action")
         }
+    }
+
+    /** Preview owns transient pixels only. It never encodes an asset or appends a replay operation. */
+    fun previewMenuBitmap(action:String, arguments:JSONObject, maxEdge:Int=512):Bitmap = locked {
+        require(maxEdge in 64..1024)
+        require(action.startsWith("filter.") || action in setOf("filter_apply_again","filter_apply_reprompt")) {"预览仅支持滤镜"}
+        val context=menuContext()
+        val item=ArtStudioMenuCatalog.find(action) ?: error("未知滤镜")
+        val available=ArtStudioMenuCatalog.availability(item,context)
+        require(available.first) {available.second}
+        var p=menuArguments(action,arguments,context,item)
+        var resolved=action
+        val snap=context.getJSONObject("document");val state=snap.getJSONObject("state")
+        if(action in setOf("filter_apply_again","filter_apply_reprompt")) {
+            val previous=state.getJSONObject("lastFilter");resolved=previous.getString("action")
+            val merged=JSONObject(previous.getJSONObject("parameters").toString())
+            if(action=="filter_apply_reprompt")p.keys().forEach {key->if(key !in setOf("documentId","expectedRevision"))merged.put(key,p.get(key))}
+            p=merged
+        }
+        val selected=requireNotNull(ArtMenuOperations.active(state))
+        val rendered=ArtRenderer.render(this,ArtMenuOperations.isolated(snap,setOf(selected.getString("id")),selected.getString("id")))
+        try {
+            ArtMenuOperations.filter(rendered,resolved,p,state.optJSONObject("selection"))
+            val scale=minOf(1.0,maxEdge.toDouble()/maxOf(rendered.width,rendered.height))
+            val output=Bitmap.createBitmap(maxOf(1,(rendered.width*scale).toInt()),maxOf(1,(rendered.height*scale).toInt()),Bitmap.Config.ARGB_8888)
+            try {
+                val canvas=Canvas(output);canvas.drawColor(Color.WHITE)
+                canvas.drawBitmap(rendered,null,android.graphics.Rect(0,0,output.width,output.height),Paint(Paint.FILTER_BITMAP_FLAG))
+                output
+            } catch(error:Throwable) {output.recycle();throw error}
+        } finally {rendered.recycle()}
+    }
+
+    fun previewMenuFilter(action:String,p:JSONObject,maxEdge:Int):JSONObject {
+        val bitmap=previewMenuBitmap(action,p,maxEdge)
+        try {
+            val image=ArtCanvasFeedback.encode(bitmap,JSONObject().put("kind","filter-layer-preview")
+                .put("documentId",p.getString("documentId")).put("revision",p.getInt("expectedRevision"))
+                .put("width",bitmap.width).put("height",bitmap.height).put("transparencyBackground","white"))
+            return JSONObject().put("historyWritten",false).put("filterPreview",image.getJSONObject("metadata"))
+                .put("mcp_content",JSONArray().put(image.getJSONObject("content")))
+        } finally {bitmap.recycle()}
     }
 
     private fun applyMenuFilter(actor: String, action: String, p: JSONObject, snapshot: JSONObject?, label: String,

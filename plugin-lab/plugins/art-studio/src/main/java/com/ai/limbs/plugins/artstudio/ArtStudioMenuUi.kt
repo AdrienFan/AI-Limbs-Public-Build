@@ -1,6 +1,7 @@
 package com.ai.limbs.plugins.artstudio
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -80,7 +81,7 @@ internal fun showStudioRemainingMenu(context: Context, anchor: View, title: Stri
 
 @Composable
 internal fun StudioMenuParameters(item: JSONObject, initial: JSONObject,
-    onDismiss: () -> Unit, onExecute: (JSONObject) -> Unit) {
+    onDismiss: () -> Unit, onPreview: ((JSONObject) -> Bitmap)? = null, onExecute: (JSONObject) -> Unit) {
     val specs = item.optJSONArray("parameters") ?: JSONArray()
     val values = remember(item) { mutableStateMapOf<String,String>().apply {
         for (n in 0 until specs.length()) {
@@ -88,6 +89,19 @@ internal fun StudioMenuParameters(item: JSONObject, initial: JSONObject,
             put(key, if (initial.has(key)) initial.get(key).toString() else field.opt("default")?.toString() ?: "")
         }
     } }
+    fun arguments():JSONObject {
+            val p=JSONObject()
+            for(n in 0 until specs.length()) {
+                val field=specs.getJSONObject(n); val key=field.getString("name"); val value=values.getValue(key)
+                p.put(key,when(field.getString("type")) {
+                    "integer" -> value.toInt()
+                    "number" -> value.toDouble().also { require(it.isFinite()) }
+                    "boolean" -> value.toBooleanStrict()
+                    else -> value.trim().also { require(field.optBoolean("allowBlank") || it.isNotBlank()) { "请填写 ${field.getString("description")}" } }
+                })
+            }
+        return p
+    }
     var error by remember(item) { mutableStateOf<String?>(null) }
     AlertDialog(onDismissRequest=onDismiss, title={ Text(item.getString("title")) }, text={
         Column(Modifier.heightIn(max=420.dp).verticalScroll(rememberScrollState()), verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -95,6 +109,7 @@ internal fun StudioMenuParameters(item: JSONObject, initial: JSONObject,
                 Text(if(item.getString("id")=="reset_configurations") "重置画室自己的基础配置，保留工程与历史。"
                     else "此操作会改变图层结构。原图层与像素保留在工程历史中，可通过撤销或足迹恢复。合并画布会移除隐藏图层。")
             item.optString("notice").takeIf { it.isNotBlank() }?.let { Text(it) }
+            if(onPreview!=null) StudioFilterPreview(values.toMap(),::arguments,onPreview)
             if (specs.length()==0) Text("确认执行此菜单操作？")
             for(n in 0 until specs.length()) {
                 val field=specs.getJSONObject(n); val key=field.getString("name")
@@ -115,17 +130,7 @@ internal fun StudioMenuParameters(item: JSONObject, initial: JSONObject,
         }
     }, confirmButton={ TextButton(onClick={
         try {
-            val p=JSONObject()
-            for(n in 0 until specs.length()) {
-                val field=specs.getJSONObject(n); val key=field.getString("name"); val value=values.getValue(key)
-                p.put(key,when(field.getString("type")) {
-                    "integer" -> value.toInt()
-                    "number" -> value.toDouble().also { require(it.isFinite()) }
-                    "boolean" -> value.toBooleanStrict()
-                    else -> value.trim().also { require(field.optBoolean("allowBlank") || it.isNotBlank()) { "请填写 ${field.getString("description")}" } }
-                })
-            }
-            onExecute(p)
+            onExecute(arguments())
         } catch(e:IllegalArgumentException) { error=e.message ?: "参数格式无效" }
     }) {Text("确定")} }, dismissButton={TextButton(onClick=onDismiss){Text("取消")}})
 }

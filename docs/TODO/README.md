@@ -48,6 +48,8 @@ For_Agent: 对项目大规模动工前按本规范协作
 
 ## 当前计划
 
+- [画室菜单滤镜迭代](art-studio-filter-audit/index.md)：初始核对为 7／53 项已实现；首阶段源码新增 15 项邻域滤镜及只读预览。待继续补齐其余功能，全部完成后统一推云编译，详见阶段进度。
+
 - [画室0.2.99工具补齐与HDR](art-studio-v0299-tool-gaps/index.md)：六类工具剩余机制、RGBA_F16／OpenEXR全链路；用户已要求HDR一起完成后统一云编译，包含独立EXR与Android像素验证。
 
 - [画室能力回执与提交确认](art-studio-capability-receipts/README.md)：只修复大工程返回与提交确认问题；其他动画问题另轮处理。

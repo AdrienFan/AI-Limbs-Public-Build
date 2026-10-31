@@ -1,0 +1,430 @@
+{
+  "date": "2026-10-31",
+  "sourceHead": "5b0b0efcea03dccb25e8ef8ece65594de3b08688",
+  "filters": [
+    {
+      "category": "调整",
+      "id": "filter.hsv_adjustment",
+      "title": "HSV 调整…",
+      "implemented": false,
+      "source": "plugins/filters/colorsfilters/kis_hsv_adjustment_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "调整",
+      "id": "filter.dodge",
+      "title": "减淡…",
+      "implemented": false,
+      "source": "plugins/filters",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "调整",
+      "id": "filter.burn",
+      "title": "加深…",
+      "implemented": false,
+      "source": "plugins/filters",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "调整",
+      "id": "filter.desaturate",
+      "title": "去色…",
+      "implemented": true,
+      "source": "plugins/filters/colorsfilters/kis_desaturate_filter.cpp",
+      "reason": null
+    },
+    {
+      "category": "调整",
+      "id": "filter.invert",
+      "title": "反相",
+      "implemented": true,
+      "source": "plugins/filters/example/example.cpp",
+      "reason": null
+    },
+    {
+      "category": "调整",
+      "id": "filter.slope_offset_power",
+      "title": "斜率、偏移、幂 (ASC-CDL)…",
+      "implemented": false,
+      "source": "plugins/filters/asccdl/kis_asccdl_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "调整",
+      "id": "filter.auto_contrast",
+      "title": "自动对比度…",
+      "implemented": false,
+      "source": "plugins/filters/colorsfilters/colorsfilters.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "调整",
+      "id": "filter.color_balance",
+      "title": "色彩平衡…",
+      "implemented": false,
+      "source": "plugins/filters/colorsfilters/kis_color_balance_filter.cpp",
+      "reason": "尚缺对应色彩空间/色彩管理模型"
+    },
+    {
+      "category": "调整",
+      "id": "filter.levels",
+      "title": "色阶…",
+      "implemented": false,
+      "source": "plugins/filters/levelfilter/KisLevelsFilter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "调整",
+      "id": "filter.cross_channel_adjustment_curves",
+      "title": "跨通道调整曲线…",
+      "implemented": false,
+      "source": "plugins/filters",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "调整",
+      "id": "filter.threshold",
+      "title": "阈值…",
+      "implemented": true,
+      "source": "plugins/filters/threshold/threshold.cpp",
+      "reason": null
+    },
+    {
+      "category": "调整",
+      "id": "filter.color_adjustment_curves",
+      "title": "颜色调整曲线…",
+      "implemented": false,
+      "source": "plugins/filters",
+      "reason": "尚缺对应色彩空间/色彩管理模型"
+    },
+    {
+      "category": "艺术效果",
+      "id": "filter.pixelize",
+      "title": "像素化…",
+      "implemented": false,
+      "source": "plugins/filters/pixelizefilter/kis_pixelize_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "艺术效果",
+      "id": "filter.halftone",
+      "title": "半色调…",
+      "implemented": false,
+      "source": "plugins/filters/halftone/KisHalftoneFilter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "艺术效果",
+      "id": "filter.oilpaint",
+      "title": "油画…",
+      "implemented": false,
+      "source": "plugins/filters/oilpaintfilter/kis_oilpaint_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "艺术效果",
+      "id": "filter.index_colors",
+      "title": "索引颜色…",
+      "implemented": false,
+      "source": "plugins/filters/indexcolors/indexcolors.cpp",
+      "reason": "尚缺对应色彩空间/色彩管理模型"
+    },
+    {
+      "category": "艺术效果",
+      "id": "filter.posterize",
+      "title": "色调分离…",
+      "implemented": true,
+      "source": "plugins/filters/posterize/posterize.cpp",
+      "reason": null
+    },
+    {
+      "category": "艺术效果",
+      "id": "filter.raindrops",
+      "title": "雨滴…",
+      "implemented": false,
+      "source": "plugins/filters/raindropsfilter/kis_raindrops_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "模糊",
+      "id": "filter.blur",
+      "title": "模糊…",
+      "implemented": false,
+      "source": "plugins/filters/blur/kis_blur_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "模糊",
+      "id": "filter.motion_blur",
+      "title": "运动模糊…",
+      "implemented": false,
+      "source": "plugins/filters/blur/kis_motion_blur_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "模糊",
+      "id": "filter.lens_blur",
+      "title": "镜头模糊…",
+      "implemented": false,
+      "source": "plugins/filters/blur/kis_lens_blur_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "模糊",
+      "id": "filter.gaussian_blur",
+      "title": "高斯模糊…",
+      "implemented": false,
+      "source": "plugins/filters/blur/kis_gaussian_blur_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "颜色",
+      "id": "filter.fast_color_overlay",
+      "title": "快速颜色叠加…",
+      "implemented": false,
+      "source": "plugins/filters/colors/KisFilterFastColorOverlay.cpp",
+      "reason": "尚缺对应色彩空间/色彩管理模型"
+    },
+    {
+      "category": "颜色",
+      "id": "filter.propagate_colors",
+      "title": "扩散颜色…",
+      "implemented": false,
+      "source": "plugins/filters",
+      "reason": "尚缺对应色彩空间/色彩管理模型"
+    },
+    {
+      "category": "颜色",
+      "id": "filter.maximize",
+      "title": "最大化通道",
+      "implemented": true,
+      "source": "plugins/filters/colors/kis_minmax_filters.cpp",
+      "reason": null
+    },
+    {
+      "category": "颜色",
+      "id": "filter.minimize",
+      "title": "最小化通道",
+      "implemented": true,
+      "source": "plugins/filters/colors/kis_minmax_filters.cpp",
+      "reason": null
+    },
+    {
+      "category": "颜色",
+      "id": "filter.color_to_alpha",
+      "title": "颜色转透明度…",
+      "implemented": false,
+      "source": "plugins/filters/colors/kis_color_to_alpha.cpp",
+      "reason": "尚缺像素选区/蒙版模型与对应算法"
+    },
+    {
+      "category": "颜色",
+      "id": "filter.color_transfer",
+      "title": "颜色迁移…",
+      "implemented": false,
+      "source": "plugins/filters/fastcolortransfer/fastcolortransfer.cpp",
+      "reason": "尚缺对应色彩空间/色彩管理模型"
+    },
+    {
+      "category": "边缘检测",
+      "id": "filter.top_edge_detection",
+      "title": "上边缘检测…",
+      "implemented": false,
+      "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "边缘检测",
+      "id": "filter.edge_detection",
+      "title": "边缘检测…",
+      "implemented": false,
+      "source": "plugins/filters/edgedetection/kis_edge_detection_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "边缘检测",
+      "id": "filter.height_to_normal_map",
+      "title": "高度转法线贴图…",
+      "implemented": false,
+      "source": "plugins/filters/convertheightnormalmap/kis_convert_height_to_normal_map_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "边缘检测",
+      "id": "filter.gaussian_high_pass",
+      "title": "高斯高通…",
+      "implemented": false,
+      "source": "plugins/filters/gaussianhighpass/gaussianhighpass_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "浮雕",
+      "id": "filter.emboss_horizontal_vertical",
+      "title": "Emboss Horizontal  Vertical…",
+      "implemented": false,
+      "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "浮雕",
+      "id": "filter.emboss_in_all_directions",
+      "title": "全方向浮雕…",
+      "implemented": false,
+      "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "浮雕",
+      "id": "filter.emboss_with_variable_depth",
+      "title": "可变深度浮雕…",
+      "implemented": false,
+      "source": "plugins/filters/embossfilter/kis_emboss_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "浮雕",
+      "id": "filter.emboss_vertical_only",
+      "title": "垂直浮雕…",
+      "implemented": false,
+      "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "浮雕",
+      "id": "filter.emboss_laplacian",
+      "title": "拉普拉斯浮雕…",
+      "implemented": false,
+      "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "浮雕",
+      "id": "filter.emboss_horizontal_only",
+      "title": "水平浮雕…",
+      "implemented": false,
+      "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "增强",
+      "id": "filter.mean_removal",
+      "title": "去除均值…",
+      "implemented": false,
+      "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "增强",
+      "id": "filter.unsharp_mask",
+      "title": "反锐化蒙版…",
+      "implemented": false,
+      "source": "plugins/filters/unsharp/kis_unsharp_filter.cpp",
+      "reason": "尚缺像素选区/蒙版模型与对应算法"
+    },
+    {
+      "category": "增强",
+      "id": "filter.wavelet_noise_reducer",
+      "title": "小波降噪…",
+      "implemented": false,
+      "source": "plugins/filters/imageenhancement/kis_wavelet_noise_reduction.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "增强",
+      "id": "filter.sharpen",
+      "title": "锐化…",
+      "implemented": false,
+      "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "增强",
+      "id": "filter.gaussian_noise_reduction",
+      "title": "高斯降噪…",
+      "implemented": false,
+      "source": "plugins/filters/imageenhancement/kis_simple_noise_reducer.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "映射",
+      "id": "filter.phong_bumpmap",
+      "title": "Phong 凹凸贴图…",
+      "implemented": false,
+      "source": "plugins/filters/phongbumpmap/kis_phong_bumpmap_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "映射",
+      "id": "filter.round_corners",
+      "title": "圆角…",
+      "implemented": false,
+      "source": "plugins/filters/roundcorners/kis_round_corners_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "映射",
+      "id": "filter.small_tiles",
+      "title": "小瓷砖…",
+      "implemented": false,
+      "source": "plugins/filters/smalltilesfilter/kis_small_tiles_filter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "映射",
+      "id": "filter.normalize",
+      "title": "归一化…",
+      "implemented": false,
+      "source": "plugins/filters/normalize/kis_normalize.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "映射",
+      "id": "filter.gradient_map",
+      "title": "渐变映射…",
+      "implemented": false,
+      "source": "plugins/filters/gradientmap/KisGradientMapFilter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "映射",
+      "id": "filter.palettize",
+      "title": "调色板量化…",
+      "implemented": false,
+      "source": "plugins/filters/palettize/palettize.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "其他",
+      "id": "filter.wave",
+      "title": "波浪…",
+      "implemented": false,
+      "source": "plugins/filters/wavefilter/wavefilter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "其他",
+      "id": "filter.resettransparent",
+      "title": "重置透明像素",
+      "implemented": true,
+      "source": "plugins/filters/resettransparent/KisResetTransparentFilter.cpp",
+      "reason": null
+    },
+    {
+      "category": "其他",
+      "id": "filter.random_noise",
+      "title": "随机噪点…",
+      "implemented": false,
+      "source": "plugins/filters/noisefilter/noisefilter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    },
+    {
+      "category": "其他",
+      "id": "filter.random_pick",
+      "title": "随机拾取…",
+      "implemented": false,
+      "source": "plugins/filters/randompickfilter/randompickfilter.cpp",
+      "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+    }
+  ]
+}

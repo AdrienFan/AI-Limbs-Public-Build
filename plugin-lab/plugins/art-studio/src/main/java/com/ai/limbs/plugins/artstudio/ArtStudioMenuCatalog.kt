@@ -1215,30 +1215,208 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.blur",
           "title": "模糊…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/blur/kis_blur_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "radiusX",
+              "type": "number",
+              "description": "横向半径（0–32 px）",
+              "default": 5
+            },
+            {
+              "name": "radiusY",
+              "type": "number",
+              "description": "纵向半径（0–32 px）",
+              "default": 5
+            },
+            {
+              "name": "angle",
+              "type": "number",
+              "description": "核旋转角（度）",
+              "default": 0
+            },
+            {
+              "name": "shape",
+              "type": "string",
+              "description": "核形状",
+              "default": "ellipse",
+              "choices": [
+                "ellipse",
+                "rectangle"
+              ]
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            },
+            {
+              "name": "alpha",
+              "type": "boolean",
+              "description": "同时处理透明度",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.motion_blur",
           "title": "运动模糊…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/blur/kis_motion_blur_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "distance",
+              "type": "number",
+              "description": "运动距离（0–128 px）",
+              "default": 10
+            },
+            {
+              "name": "angle",
+              "type": "number",
+              "description": "运动方向（度）",
+              "default": 0
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            },
+            {
+              "name": "alpha",
+              "type": "boolean",
+              "description": "同时处理透明度",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.lens_blur",
           "title": "镜头模糊…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/blur/kis_lens_blur_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "radius",
+              "type": "number",
+              "description": "光圈半径（0–32 px）",
+              "default": 5
+            },
+            {
+              "name": "sides",
+              "type": "integer",
+              "description": "光圈边数（3–12）",
+              "default": 5
+            },
+            {
+              "name": "angle",
+              "type": "number",
+              "description": "光圈旋转角（度）",
+              "default": 0
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            },
+            {
+              "name": "alpha",
+              "type": "boolean",
+              "description": "同时处理透明度",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.gaussian_blur",
           "title": "高斯模糊…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/blur/kis_gaussian_blur_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "sigmaX",
+              "type": "number",
+              "description": "横向标准差 σ（0–128 px）",
+              "default": 3
+            },
+            {
+              "name": "sigmaY",
+              "type": "number",
+              "description": "纵向标准差 σ（0–128 px）",
+              "default": 3
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            },
+            {
+              "name": "alpha",
+              "type": "boolean",
+              "description": "同时处理透明度",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         }
       ]
     },
@@ -1306,9 +1484,30 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.top_edge_detection",
           "title": "上边缘检测…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.edge_detection",
@@ -1327,9 +1526,36 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.gaussian_high_pass",
           "title": "高斯高通…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/gaussianhighpass/gaussianhighpass_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "sigma",
+              "type": "number",
+              "description": "模糊标准差 σ（0–128 px）",
+              "default": 3
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         }
       ]
     },
@@ -1340,44 +1566,176 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.emboss_horizontal_vertical",
           "title": "Emboss Horizontal  Vertical…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.emboss_in_all_directions",
           "title": "全方向浮雕…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.emboss_with_variable_depth",
           "title": "可变深度浮雕…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/embossfilter/kis_emboss_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "depth",
+              "type": "number",
+              "description": "深度（10–300）",
+              "default": 30
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.emboss_vertical_only",
           "title": "垂直浮雕…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.emboss_laplacian",
           "title": "拉普拉斯浮雕…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.emboss_horizontal_only",
           "title": "水平浮雕…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         }
       ]
     },
@@ -1388,16 +1746,82 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.mean_removal",
           "title": "去除均值…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.unsharp_mask",
           "title": "反锐化蒙版…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/unsharp/kis_unsharp_filter.cpp",
-          "reason": "尚缺像素选区/蒙版模型与对应算法"
+          "parameters": [
+            {
+              "name": "sigma",
+              "type": "number",
+              "description": "模糊标准差 σ（0–128 px）",
+              "default": 3
+            },
+            {
+              "name": "amount",
+              "type": "number",
+              "description": "锐化强度（0–10）",
+              "default": 1
+            },
+            {
+              "name": "threshold",
+              "type": "number",
+              "description": "线性亮度／通道差阈值（0–1）",
+              "default": 0
+            },
+            {
+              "name": "lightnessOnly",
+              "type": "boolean",
+              "description": "只增强线性亮度，保持通道差；非 Lab 模式",
+              "default": true
+            },
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.wavelet_noise_reducer",
@@ -1409,9 +1833,30 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.sharpen",
           "title": "锐化…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [
+            {
+              "name": "red",
+              "type": "boolean",
+              "description": "处理红色通道",
+              "default": true
+            },
+            {
+              "name": "green",
+              "type": "boolean",
+              "description": "处理绿色通道",
+              "default": true
+            },
+            {
+              "name": "blue",
+              "type": "boolean",
+              "description": "处理蓝色通道",
+              "default": true
+            }
+          ],
+          "documentWrite": true,
+          "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.gaussian_noise_reduction",
@@ -2118,6 +2563,7 @@ internal object ArtStudioMenuCatalog {
                 if(item.has("id") && !item.has("children")) {
                     val status=availability(item,context)
                     item.put("enabled",status.first).put("unavailableReason",status.second)
+                    if(item.optBoolean("implemented") && (item.getString("id").startsWith("filter.") || item.getString("id") in setOf("filter_apply_again","filter_apply_reprompt"))) item.put("filterPreview",true)
                     context.optJSONObject("dockPanels")?.let { dock ->
                         val panel = item.getString("id").removePrefix("docker.")
                         if (panel in ArtDockPanels.ids)

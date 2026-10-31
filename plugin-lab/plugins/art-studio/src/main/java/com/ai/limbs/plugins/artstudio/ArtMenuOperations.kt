@@ -173,6 +173,23 @@ internal object ArtMenuOperations {
         .put("contentOrder", JSONArray().put(JSONObject().put("kind", "paste").put("asset", asset).put("x", 0).put("y", 0)))
 
     fun filter(bitmap: Bitmap, action: String, p: JSONObject, selection: JSONObject?) {
+        if(action in ArtNeighborhoodFilters.ids) {
+            val input=ArtFloatPixels.read(bitmap)
+            val filtered=ArtNeighborhoodFilters.process(action,input,bitmap.width,bitmap.height,p,ArtImagePolicy.budgetBytes())
+            val coverage=selection?.takeIf {it.has("coverage")}?.let {ArtSoftSelection.Sampler(it)}
+            val region=selection?.takeIf {!it.has("coverage")}?.let {Region().apply {setPath(ArtSelection.path(it),Region(0,0,bitmap.width,bitmap.height))}}
+            // Read the entire neighborhood first; apply the selection only to the final output.
+            for(y in 0 until bitmap.height) {
+                if(Thread.currentThread().isInterrupted)throw java.util.concurrent.CancellationException("滤镜已取消")
+                for(x in 0 until bitmap.width) {
+                    val amount=if(region!=null && !region.contains(x,y))0f else (coverage?.at(x+.5,y+.5) ?: 255)/255f
+                    val i=(y*bitmap.width+x)*4
+                    for(c in 0..3)input[i+c]=input[i+c]*(1-amount)+filtered[i+c]*amount
+                }
+            }
+            ArtFloatPixels.write(bitmap,input)
+            return
+        }
         val threshold = p.optInt("threshold", 128)
         val steps = p.optInt("steps", 16)
         val mode = p.optString("mode", "lightness")
@@ -182,6 +199,7 @@ internal object ArtMenuOperations {
         val region = selection?.takeIf {!it.has("coverage")}?.let { Region().apply { setPath(ArtSelection.path(it), Region(0, 0, bitmap.width, bitmap.height)) } }
         val pixels=ArtFloatPixels.read(bitmap)
         for(y in 0 until bitmap.height)for(x in 0 until bitmap.width) {
+            if(x==0 && Thread.currentThread().isInterrupted)throw java.util.concurrent.CancellationException("滤镜已取消")
             if(region!=null && !region.contains(x,y))continue
             val amount=(coverage?.at(x+.5,y+.5) ?: 255)/255f;if(amount==0f)continue
             val i=(y*bitmap.width+x)*4;val a=pixels[i+3]

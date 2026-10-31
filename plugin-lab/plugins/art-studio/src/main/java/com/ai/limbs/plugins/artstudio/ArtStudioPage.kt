@@ -1838,7 +1838,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                         defaults.put("brushWidth",settings.getDouble("brushWidth")).put("brushOpacity",settings.getDouble("brushOpacity"))
                             .put("confirmPanelClose",dockPanelState.getBoolean("confirmClose"))
                     }
-                    if(params.length()>0 || id in setOf("flatten_image","flatten_layer","merge_layer","cut_layer_clipboard","reset_configurations")) {
+                    if(item.optBoolean("filterPreview") || params.length()>0 || id in setOf("flatten_image","flatten_layer","merge_layer","cut_layer_clipboard","reset_configurations")) {
                         remainingDialog=item;remainingCaptured=captured;remainingDefaults=defaults
                     } else executeRemaining(item,captured,JSONObject())
                 }
@@ -3854,7 +3854,13 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             })
     }
     remainingDialog?.let { item ->
-        StudioMenuParameters(item,remainingDefaults,onDismiss={remainingDialog=null}) { parameters ->
+        val previewDocument=remainingCaptured.optJSONObject("document")
+        val preview:((JSONObject)->Bitmap)?=if(item.optBoolean("filterPreview")) { parameters ->
+            val doc=requireNotNull(previewDocument)
+            store.previewMenuBitmap(item.getString("id"),JSONObject(parameters.toString())
+                .put("documentId",doc.getString("id")).put("expectedRevision",doc.getInt("revision")))
+        } else null
+        StudioMenuParameters(item,remainingDefaults,onDismiss={remainingDialog=null},onPreview=preview) { parameters ->
             val captured=remainingCaptured
             remainingDialog=null
             executeRemaining(item,captured,parameters)
