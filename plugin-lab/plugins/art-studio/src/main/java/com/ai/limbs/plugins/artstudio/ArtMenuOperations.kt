@@ -173,11 +173,15 @@ internal object ArtMenuOperations {
         .put("contentOrder", JSONArray().put(JSONObject().put("kind", "paste").put("asset", asset).put("x", 0).put("y", 0)))
 
     fun filter(bitmap: Bitmap, action: String, p: JSONObject, selection: JSONObject?) {
-        if(action in ArtNeighborhoodFilters.ids || action in ArtColorFilters.ids) {
+        if(action in ArtNeighborhoodFilters.ids || action in ArtColorFilters.ids ||
+            action in ArtSpatialFilters.ids || action in ArtSurfaceFilters.ids) {
             val input=ArtFloatPixels.read(bitmap)
-            val filtered=if(action in ArtColorFilters.ids)
-                ArtColorFilters.process(action,input,bitmap.width,bitmap.height,p,ArtImagePolicy.budgetBytes())
-            else ArtNeighborhoodFilters.process(action,input,bitmap.width,bitmap.height,p,ArtImagePolicy.budgetBytes())
+            val filtered=when(action) {
+                in ArtColorFilters.ids -> ArtColorFilters.process(action,input,bitmap.width,bitmap.height,p,ArtImagePolicy.budgetBytes())
+                in ArtSpatialFilters.ids -> ArtSpatialFilters.process(action,input,bitmap.width,bitmap.height,p,ArtImagePolicy.budgetBytes())
+                in ArtSurfaceFilters.ids -> ArtSurfaceFilters.process(action,input,bitmap.width,bitmap.height,p,ArtImagePolicy.budgetBytes())
+                else -> ArtNeighborhoodFilters.process(action,input,bitmap.width,bitmap.height,p,ArtImagePolicy.budgetBytes())
+            }
             val coverage=selection?.takeIf {it.has("coverage")}?.let {ArtSoftSelection.Sampler(it)}
             val region=selection?.takeIf {!it.has("coverage")}?.let {Region().apply {setPath(ArtSelection.path(it),Region(0,0,bitmap.width,bitmap.height))}}
             // Read the entire neighborhood first; apply the selection only to the final output.

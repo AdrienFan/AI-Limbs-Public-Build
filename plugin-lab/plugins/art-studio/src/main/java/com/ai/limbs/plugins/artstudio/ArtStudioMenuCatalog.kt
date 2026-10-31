@@ -1046,76 +1046,16 @@ internal object ArtStudioMenuCatalog {
           "title": "HSV 调整…",
           "implemented": true,
           "source": "plugins/filters/colorsfilters/kis_hsv_adjustment_filter.cpp",
-          "parameters": [
-            {
-              "name": "hue",
-              "type": "number",
-              "description": "色相偏移角度−360–360；着色模式为绝对色相",
-              "default": 0
-            },
-            {
-              "name": "saturation",
-              "type": "number",
-              "description": "饱和度调整−1–1；着色模式为0–1绝对值",
-              "default": 0
-            },
-            {
-              "name": "value",
-              "type": "number",
-              "description": "HSV明度或HSL亮度调整−1–1",
-              "default": 0
-            },
-            {
-              "name": "model",
-              "type": "string",
-              "description": "颜色模型",
-              "default": "hsv",
-              "choices": [
-                "hsv",
-                "hsl"
-              ]
-            },
-            {
-              "name": "colorize",
-              "type": "boolean",
-              "description": "着色模式",
-              "default": false
-            },
-            {
-              "name": "clipInput",
-              "type": "boolean",
-              "description": "明确允许将工作域RGB裁到0–1",
-              "default": false
-            },
-            {
-              "name": "space",
-              "type": "string",
-              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
-              "default": "srgb",
-              "choices": [
-                "linear",
-                "srgb"
-              ]
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"hue","type":"number","description":"色相偏移角度−360–360；着色模式为绝对色相","default":0},
+              {"name":"saturation","type":"number","description":"饱和度调整−1–1；着色模式为0–1绝对值","default":0},
+              {"name":"value","type":"number","description":"HSV明度或HSL亮度调整−1–1","default":0},
+              {"name":"model","type":"string","description":"颜色模型","default":"hsv","choices":["hsv","hsl"]},
+              {"name":"colorize","type":"boolean","description":"着色模式","default":false},
+              {"name":"clipInput","type":"boolean","description":"明确允许将工作域RGB裁到0–1","default":false},
+              {"name":"space","type":"string","description":"RGB工作域；linear为线性光，srgb为带符号扩展sRGB","default":"srgb","choices":["linear","srgb"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true}],
           "documentWrite": true,
           "notice": "支持HSV/HSL；不包含Krita的HSI、HSY、YUV和旧兼容模式。非中性调整要求工作域RGB在0–1内；越界时明确拒绝，或由clipInput显式裁切。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
@@ -1124,53 +1064,12 @@ internal object ArtStudioMenuCatalog {
           "title": "减淡…",
           "implemented": true,
           "source": "plugins/filters/dodgeburn/DodgeBurn.cpp",
-          "parameters": [
-            {
-              "name": "range",
-              "type": "string",
-              "description": "作用范围",
-              "default": "midtones",
-              "choices": [
-                "shadows",
-                "midtones",
-                "highlights"
-              ]
-            },
-            {
-              "name": "exposure",
-              "type": "number",
-              "description": "曝光量0–1",
-              "default": 0.5
-            },
-            {
-              "name": "space",
-              "type": "string",
-              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
-              "default": "srgb",
-              "choices": [
-                "linear",
-                "srgb"
-              ]
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"range","type":"string","description":"作用范围","default":"midtones","choices":["shadows","midtones","highlights"]},
+              {"name":"exposure","type":"number","description":"曝光量0–1","default":0.5},
+              {"name":"space","type":"string","description":"RGB工作域；linear为线性光，srgb为带符号扩展sRGB","default":"srgb","choices":["linear","srgb"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true}],
           "documentWrite": true,
           "notice": "按Krita的阴影／中间调／高光公式处理；中间调幂运算要求工作域RGB非负。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
@@ -1179,53 +1078,12 @@ internal object ArtStudioMenuCatalog {
           "title": "加深…",
           "implemented": true,
           "source": "plugins/filters/dodgeburn/DodgeBurn.cpp",
-          "parameters": [
-            {
-              "name": "range",
-              "type": "string",
-              "description": "作用范围",
-              "default": "midtones",
-              "choices": [
-                "shadows",
-                "midtones",
-                "highlights"
-              ]
-            },
-            {
-              "name": "exposure",
-              "type": "number",
-              "description": "曝光量0–1",
-              "default": 0.5
-            },
-            {
-              "name": "space",
-              "type": "string",
-              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
-              "default": "srgb",
-              "choices": [
-                "linear",
-                "srgb"
-              ]
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"range","type":"string","description":"作用范围","default":"midtones","choices":["shadows","midtones","highlights"]},
+              {"name":"exposure","type":"number","description":"曝光量0–1","default":0.5},
+              {"name":"space","type":"string","description":"RGB工作域；linear为线性光，srgb为带符号扩展sRGB","default":"srgb","choices":["linear","srgb"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true}],
           "documentWrite": true,
           "notice": "按Krita的阴影／中间调／高光公式处理；中间调幂运算要求工作域RGB非负，阴影公式裁限负输出。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
@@ -1234,22 +1092,7 @@ internal object ArtStudioMenuCatalog {
           "title": "去色…",
           "implemented": true,
           "source": "plugins/filters/colorsfilters/kis_desaturate_filter.cpp",
-          "parameters": [
-            {
-              "name": "mode",
-              "type": "string",
-              "description": "去色算法",
-              "default": "lightness",
-              "choices": [
-                "lightness",
-                "luminosity",
-                "luminosity601",
-                "average",
-                "min",
-                "max"
-              ]
-            }
-          ],
+          "parameters": [{"name":"mode","type":"string","description":"去色算法","default":"lightness","choices":["lightness","luminosity","luminosity601","average","min","max"]}],
           "documentWrite": true
         },
         {
@@ -1265,66 +1108,13 @@ internal object ArtStudioMenuCatalog {
           "title": "斜率、偏移、幂 (ASC-CDL)…",
           "implemented": true,
           "source": "plugins/filters/asccdl/kis_asccdl_filter.cpp",
-          "parameters": [
-            {
-              "name": "slope",
-              "type": "array",
-              "description": "RGB斜率数组，3项−16–16",
-              "default": [
-                1,
-                1,
-                1
-              ]
-            },
-            {
-              "name": "offset",
-              "type": "array",
-              "description": "RGB偏移数组，3项−16–16",
-              "default": [
-                0,
-                0,
-                0
-              ]
-            },
-            {
-              "name": "power",
-              "type": "array",
-              "description": "RGB幂数组，3项0.01–16",
-              "default": [
-                1,
-                1,
-                1
-              ]
-            },
-            {
-              "name": "space",
-              "type": "string",
-              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
-              "default": "srgb",
-              "choices": [
-                "linear",
-                "srgb"
-              ]
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"slope","type":"array","description":"RGB斜率数组，3项−16–16","default":[1,1,1]},
+              {"name":"offset","type":"array","description":"RGB偏移数组，3项−16–16","default":[0,0,0]},
+              {"name":"power","type":"array","description":"RGB幂数组，3项0.01–16","default":[1,1,1]},
+              {"name":"space","type":"string","description":"RGB工作域；linear为线性光，srgb为带符号扩展sRGB","default":"srgb","choices":["linear","srgb"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true}],
           "documentWrite": true,
           "notice": "依次执行pow(RGB×slope+offset,power)。负底数与分数次幂组合明确拒绝；不自动裁切HDR。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
@@ -1333,32 +1123,10 @@ internal object ArtStudioMenuCatalog {
           "title": "自动对比度…",
           "implemented": true,
           "source": "plugins/filters/colorsfilters/colorsfilters.cpp",
-          "parameters": [
-            {
-              "name": "percentile",
-              "type": "number",
-              "description": "直方图两端各裁去的百分比0–49",
-              "default": 0.5
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"percentile","type":"number","description":"直方图两端各裁去的百分比0–49","default":0.5},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true}],
           "documentWrite": true,
           "notice": "以本层全部非透明像素统计4096档D65 Lab明度；拉伸后再以选区混合输出，非选区专属统计。不是Krita的ICC Lab变换；统计明度限制0–100，平坦图保持原值。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
@@ -1367,78 +1135,15 @@ internal object ArtStudioMenuCatalog {
           "title": "色彩平衡…",
           "implemented": true,
           "source": "plugins/filters/colorsfilters/kis_color_balance_filter.cpp",
-          "parameters": [
-            {
-              "name": "shadows",
-              "type": "array",
-              "description": "阴影RGB偏移数组，3项−1–1",
-              "default": [
-                0,
-                0,
-                0
-              ]
-            },
-            {
-              "name": "midtones",
-              "type": "array",
-              "description": "中间调RGB偏移数组，3项−1–1",
-              "default": [
-                0,
-                0,
-                0
-              ]
-            },
-            {
-              "name": "highlights",
-              "type": "array",
-              "description": "高光RGB偏移数组，3项−1–1",
-              "default": [
-                0,
-                0,
-                0
-              ]
-            },
-            {
-              "name": "preserveLuminosity",
-              "type": "boolean",
-              "description": "保留HSL亮度",
-              "default": true
-            },
-            {
-              "name": "clipInput",
-              "type": "boolean",
-              "description": "明确允许将工作域RGB裁到0–1",
-              "default": false
-            },
-            {
-              "name": "space",
-              "type": "string",
-              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
-              "default": "srgb",
-              "choices": [
-                "linear",
-                "srgb"
-              ]
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"shadows","type":"array","description":"阴影RGB偏移数组，3项−1–1","default":[0,0,0]},
+              {"name":"midtones","type":"array","description":"中间调RGB偏移数组，3项−1–1","default":[0,0,0]},
+              {"name":"highlights","type":"array","description":"高光RGB偏移数组，3项−1–1","default":[0,0,0]},
+              {"name":"preserveLuminosity","type":"boolean","description":"保留HSL亮度","default":true},
+              {"name":"clipInput","type":"boolean","description":"明确允许将工作域RGB裁到0–1","default":false},
+              {"name":"space","type":"string","description":"RGB工作域；linear为线性光，srgb为带符号扩展sRGB","default":"srgb","choices":["linear","srgb"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true}],
           "documentWrite": true,
           "notice": "使用Krita的分段权重和HSL亮度恢复；实际调整要求0–1工作域并将结果裁到0–1。尚无ICC色彩空间变换。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
@@ -1447,72 +1152,14 @@ internal object ArtStudioMenuCatalog {
           "title": "色阶…",
           "implemented": true,
           "source": "plugins/filters/levelfilter/KisLevelsFilter.cpp",
-          "parameters": [
-            {
-              "name": "levels",
-              "type": "object",
-              "description": "色阶对象：master/red/green/blue/alpha各含black、white、gamma、outBlack、outWhite",
-              "default": {
-                "master": {
-                  "black": 0,
-                  "white": 1,
-                  "gamma": 1,
-                  "outBlack": 0,
-                  "outWhite": 1
-                }
-              }
-            },
-            {
-              "name": "mode",
-              "type": "string",
-              "description": "处理模式：channels为RGB，lightness为D65 Lab明度",
-              "default": "channels",
-              "choices": [
-                "channels",
-                "lightness"
-              ]
-            },
-            {
-              "name": "clipInput",
-              "type": "boolean",
-              "description": "把每级色阶的归一化输入裁到0–1",
-              "default": false
-            },
-            {
-              "name": "space",
-              "type": "string",
-              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
-              "default": "srgb",
-              "choices": [
-                "linear",
-                "srgb"
-              ]
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝通道",
-              "default": true
-            },
-            {
-              "name": "alpha",
-              "type": "boolean",
-              "description": "处理透明度通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"levels","type":"object","description":"色阶对象：master/red/green/blue/alpha各含black、white、gamma、outBlack、outWhite","default":{"master":{"black":0,"white":1,"gamma":1,"outBlack":0,"outWhite":1}}},
+              {"name":"mode","type":"string","description":"处理模式：channels为RGB，lightness为D65 Lab明度","default":"channels","choices":["channels","lightness"]},
+              {"name":"clipInput","type":"boolean","description":"把每级色阶的归一化输入裁到0–1","default":false},
+              {"name":"space","type":"string","description":"RGB工作域；linear为线性光，srgb为带符号扩展sRGB","default":"srgb","choices":["linear","srgb"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true},
+              {"name":"alpha","type":"boolean","description":"处理透明度通道","default":true}],
           "documentWrite": true,
           "notice": "white必须大于black；gamma为0.01–100，其余色阶值−16–16。不裁切时采用带符号幂延展HDR；alpha始终裁到0–1。明度模式仅接受master/alpha，不是Krita ICC Lab模式。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
@@ -1521,79 +1168,14 @@ internal object ArtStudioMenuCatalog {
           "title": "跨通道调整曲线…",
           "implemented": true,
           "source": "plugins/filters/colorsfilters/kis_cross_channel_filter.cpp",
-          "parameters": [
-            {
-              "name": "rules",
-              "type": "array",
-              "description": "按顺序执行的规则数组：driver、target、points",
-              "default": [
-                {
-                  "driver": "red",
-                  "target": "green",
-                  "points": [
-                    [
-                      0,
-                      0.5
-                    ],
-                    [
-                      1,
-                      0.5
-                    ]
-                  ]
-                }
-              ]
-            },
-            {
-              "name": "interpolation",
-              "type": "string",
-              "description": "曲线插值：smooth为保形三次Hermite",
-              "default": "smooth",
-              "choices": [
-                "linear",
-                "smooth"
-              ]
-            },
-            {
-              "name": "clipInput",
-              "type": "boolean",
-              "description": "明确允许将工作域RGB裁到0–1",
-              "default": false
-            },
-            {
-              "name": "space",
-              "type": "string",
-              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
-              "default": "srgb",
-              "choices": [
-                "linear",
-                "srgb"
-              ]
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝通道",
-              "default": true
-            },
-            {
-              "name": "alpha",
-              "type": "boolean",
-              "description": "处理透明度通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"rules","type":"array","description":"按顺序执行的规则数组：driver、target、points","default":[{"driver":"red","target":"green","points":[[0,0.5],[1,0.5]]}]},
+              {"name":"interpolation","type":"string","description":"曲线插值：smooth为保形三次Hermite","default":"smooth","choices":["linear","smooth"]},
+              {"name":"clipInput","type":"boolean","description":"明确允许将工作域RGB裁到0–1","default":false},
+              {"name":"space","type":"string","description":"RGB工作域；linear为线性光，srgb为带符号扩展sRGB","default":"srgb","choices":["linear","srgb"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true},
+              {"name":"alpha","type":"boolean","description":"处理透明度通道","default":true}],
           "documentWrite": true,
           "notice": "最多16条规则；driver=red/green/blue/alpha/hue/saturation/value/luminance，target另可master。points为2–32个[x,y]节点，端点x=0/1，y为−16–16。增量=2×curve(driver)−1，0.5恒定曲线为中性；越界driver取端值。luminance为所选工作域的Rec.709加权值，target luminance等量加RGB；HSV分支要求0–1。规则按给定顺序执行，不冒用Krita的虚拟通道顺序。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
@@ -1602,14 +1184,7 @@ internal object ArtStudioMenuCatalog {
           "title": "阈值…",
           "implemented": true,
           "source": "plugins/filters/threshold/threshold.cpp",
-          "parameters": [
-            {
-              "name": "threshold",
-              "type": "integer",
-              "description": "阈值（0–255）",
-              "default": 128
-            }
-          ],
+          "parameters": [{"name":"threshold","type":"integer","description":"阈值（0–255）","default":128}],
           "documentWrite": true
         },
         {
@@ -1617,79 +1192,14 @@ internal object ArtStudioMenuCatalog {
           "title": "颜色调整曲线…",
           "implemented": true,
           "source": "plugins/filters",
-          "parameters": [
-            {
-              "name": "curves",
-              "type": "object",
-              "description": "曲线对象：master/red/green/blue/alpha -> [[x,y],…]",
-              "default": {
-                "master": [
-                  [
-                    0,
-                    0
-                  ],
-                  [
-                    1,
-                    1
-                  ]
-                ]
-              }
-            },
-            {
-              "name": "interpolation",
-              "type": "string",
-              "description": "曲线插值：smooth为保形三次Hermite",
-              "default": "smooth",
-              "choices": [
-                "linear",
-                "smooth"
-              ]
-            },
-            {
-              "name": "outside",
-              "type": "string",
-              "description": "HDR区间外处理",
-              "default": "linear",
-              "choices": [
-                "linear",
-                "constant"
-              ]
-            },
-            {
-              "name": "space",
-              "type": "string",
-              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
-              "default": "srgb",
-              "choices": [
-                "linear",
-                "srgb"
-              ]
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝通道",
-              "default": true
-            },
-            {
-              "name": "alpha",
-              "type": "boolean",
-              "description": "处理透明度通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"curves","type":"object","description":"曲线对象：master/red/green/blue/alpha -> [[x,y],…]","default":{"master":[[0,0],[1,1]]}},
+              {"name":"interpolation","type":"string","description":"曲线插值：smooth为保形三次Hermite","default":"smooth","choices":["linear","smooth"]},
+              {"name":"outside","type":"string","description":"HDR区间外处理","default":"linear","choices":["linear","constant"]},
+              {"name":"space","type":"string","description":"RGB工作域；linear为线性光，srgb为带符号扩展sRGB","default":"srgb","choices":["linear","srgb"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true},
+              {"name":"alpha","type":"boolean","description":"处理透明度通道","default":true}],
           "documentWrite": true,
           "notice": "每条曲线2–32节点，x严格递增且含0/1端点，y为−16–16。master先于RGB单通道；alpha独立且输出裁到0–1。图形编辑支持y为0–1，其余可直接编辑JSON。插值不是Krita的样条实现。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         }
@@ -1702,9 +1212,16 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.pixelize",
           "title": "像素化…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/pixelizefilter/kis_pixelize_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [{"name":"pixelWidth","type":"integer","description":"块宽1–512像素","default":10},
+              {"name":"pixelHeight","type":"integer","description":"块高1–512像素","default":10},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true},
+              {"name":"alpha","type":"boolean","description":"处理透明度通道","default":true}],
+          "documentWrite": true,
+          "notice": "块对齐画布原点；完整块先读取再求线性预乘RGBA平均，边缘块按实际像素数求平均。选区只控制最终写入。 手机与filter.catalog发现、menu.preview预览、menu.execute应用共用此实现。"
         },
         {
           "id": "filter.halftone",
@@ -1716,9 +1233,15 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.oilpaint",
           "title": "油画…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/oilpaintfilter/kis_oilpaint_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [{"name":"brushSize","type":"integer","description":"邻域半径1–8像素","default":1},
+              {"name":"smooth","type":"integer","description":"亮度分桶数2–255","default":30},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true}],
+          "documentWrite": true,
+          "notice": "统计邻域主导亮度桶，输出桶内直通RGB平均并保留中心alpha。跳过透明邻点，亮度分桶裁到0–1；RGB平均保留HDR。边缘重复取样，计数使用整数，非Krita的8位计数。 手机与filter.catalog发现、menu.preview预览、menu.execute应用共用此实现。"
         },
         {
           "id": "filter.index_colors",
@@ -1732,22 +1255,26 @@ internal object ArtStudioMenuCatalog {
           "title": "色调分离…",
           "implemented": true,
           "source": "plugins/filters/posterize/posterize.cpp",
-          "parameters": [
-            {
-              "name": "steps",
-              "type": "integer",
-              "description": "量化步数（2–128；包含透明度通道）",
-              "default": 16
-            }
-          ],
+          "parameters": [{"name":"steps","type":"integer","description":"量化步数（2–128；包含透明度通道）","default":16}],
           "documentWrite": true
         },
         {
           "id": "filter.raindrops",
           "title": "雨滴…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/raindropsfilter/kis_raindrops_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [{"name":"dropSize","type":"integer","description":"最大雨滴直径5–128像素","default":80},
+              {"name":"number","type":"integer","description":"最多生成雨滴数0–256","default":80},
+              {"name":"fishEyes","type":"number","description":"指数鱼眼强度1–100","default":30},
+              {"name":"lighting","type":"number","description":"边缘光影强度0–4","default":1},
+              {"name":"blur","type":"boolean","description":"雨滴边缘3×3预乘柔化","default":true},
+              {"name":"seed","type":"integer","description":"固定随机种子，32位有符号整数；同参数可复现","default":0},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true},
+              {"name":"alpha","type":"boolean","description":"处理透明度通道","default":true}],
+          "documentWrite": true,
+          "notice": "采用指数径向折射、不重叠圆形雨滴与定向边缘光影；每滴最多256次放置尝试，无可用位置则结束，number是上限。固定种子复现；光影和柔化使用画室模型，不是Krita的8位角度分区光影。 手机与filter.catalog发现、menu.preview预览、menu.execute应用共用此实现。"
         }
       ]
     },
@@ -1760,60 +1287,14 @@ internal object ArtStudioMenuCatalog {
           "title": "模糊…",
           "implemented": true,
           "source": "plugins/filters/blur/kis_blur_filter.cpp",
-          "parameters": [
-            {
-              "name": "radiusX",
-              "type": "number",
-              "description": "横向半径（0–32 px）",
-              "default": 5
-            },
-            {
-              "name": "radiusY",
-              "type": "number",
-              "description": "纵向半径（0–32 px）",
-              "default": 5
-            },
-            {
-              "name": "angle",
-              "type": "number",
-              "description": "核旋转角（度）",
-              "default": 0
-            },
-            {
-              "name": "shape",
-              "type": "string",
-              "description": "核形状",
-              "default": "ellipse",
-              "choices": [
-                "ellipse",
-                "rectangle"
-              ]
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            },
-            {
-              "name": "alpha",
-              "type": "boolean",
-              "description": "同时处理透明度",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"radiusX","type":"number","description":"横向半径（0–32 px）","default":5},
+              {"name":"radiusY","type":"number","description":"纵向半径（0–32 px）","default":5},
+              {"name":"angle","type":"number","description":"核旋转角（度）","default":0},
+              {"name":"shape","type":"string","description":"核形状","default":"ellipse","choices":["ellipse","rectangle"]},
+              {"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true},
+              {"name":"alpha","type":"boolean","description":"同时处理透明度","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
@@ -1822,44 +1303,12 @@ internal object ArtStudioMenuCatalog {
           "title": "运动模糊…",
           "implemented": true,
           "source": "plugins/filters/blur/kis_motion_blur_filter.cpp",
-          "parameters": [
-            {
-              "name": "distance",
-              "type": "number",
-              "description": "运动距离（0–128 px）",
-              "default": 10
-            },
-            {
-              "name": "angle",
-              "type": "number",
-              "description": "运动方向（度）",
-              "default": 0
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            },
-            {
-              "name": "alpha",
-              "type": "boolean",
-              "description": "同时处理透明度",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"distance","type":"number","description":"运动距离（0–128 px）","default":10},
+              {"name":"angle","type":"number","description":"运动方向（度）","default":0},
+              {"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true},
+              {"name":"alpha","type":"boolean","description":"同时处理透明度","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
@@ -1868,50 +1317,13 @@ internal object ArtStudioMenuCatalog {
           "title": "镜头模糊…",
           "implemented": true,
           "source": "plugins/filters/blur/kis_lens_blur_filter.cpp",
-          "parameters": [
-            {
-              "name": "radius",
-              "type": "number",
-              "description": "光圈半径（0–32 px）",
-              "default": 5
-            },
-            {
-              "name": "sides",
-              "type": "integer",
-              "description": "光圈边数（3–12）",
-              "default": 5
-            },
-            {
-              "name": "angle",
-              "type": "number",
-              "description": "光圈旋转角（度）",
-              "default": 0
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            },
-            {
-              "name": "alpha",
-              "type": "boolean",
-              "description": "同时处理透明度",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"radius","type":"number","description":"光圈半径（0–32 px）","default":5},
+              {"name":"sides","type":"integer","description":"光圈边数（3–12）","default":5},
+              {"name":"angle","type":"number","description":"光圈旋转角（度）","default":0},
+              {"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true},
+              {"name":"alpha","type":"boolean","description":"同时处理透明度","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
@@ -1920,44 +1332,12 @@ internal object ArtStudioMenuCatalog {
           "title": "高斯模糊…",
           "implemented": true,
           "source": "plugins/filters/blur/kis_gaussian_blur_filter.cpp",
-          "parameters": [
-            {
-              "name": "sigmaX",
-              "type": "number",
-              "description": "横向标准差 σ（0–128 px）",
-              "default": 3
-            },
-            {
-              "name": "sigmaY",
-              "type": "number",
-              "description": "纵向标准差 σ（0–128 px）",
-              "default": 3
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            },
-            {
-              "name": "alpha",
-              "type": "boolean",
-              "description": "同时处理透明度",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"sigmaX","type":"number","description":"横向标准差 σ（0–128 px）","default":3},
+              {"name":"sigmaY","type":"number","description":"纵向标准差 σ（0–128 px）","default":3},
+              {"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true},
+              {"name":"alpha","type":"boolean","description":"同时处理透明度","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         }
@@ -1972,64 +1352,13 @@ internal object ArtStudioMenuCatalog {
           "title": "快速颜色叠加…",
           "implemented": true,
           "source": "plugins/filters/colors/KisFilterFastColorOverlay.cpp",
-          "parameters": [
-            {
-              "name": "color",
-              "type": "string",
-              "description": "叠加色#AARRGGBB",
-              "default": "#FFFFFFFF"
-            },
-            {
-              "name": "opacity",
-              "type": "number",
-              "description": "叠加不透明度0–1",
-              "default": 1
-            },
-            {
-              "name": "blend",
-              "type": "string",
-              "description": "叠加混合模式",
-              "default": "normal",
-              "choices": [
-                "normal",
-                "multiply",
-                "screen",
-                "overlay",
-                "darken",
-                "lighten",
-                "add",
-                "difference"
-              ]
-            },
-            {
-              "name": "space",
-              "type": "string",
-              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
-              "default": "srgb",
-              "choices": [
-                "linear",
-                "srgb"
-              ]
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"color","type":"string","description":"叠加色#AARRGGBB","default":"#FFFFFFFF"},
+              {"name":"opacity","type":"number","description":"叠加不透明度0–1","default":1},
+              {"name":"blend","type":"string","description":"叠加混合模式","default":"normal","choices":["normal","multiply","screen","overlay","darken","lighten","add","difference"]},
+              {"name":"space","type":"string","description":"RGB工作域；linear为线性光，srgb为带符号扩展sRGB","default":"srgb","choices":["linear","srgb"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true}],
           "documentWrite": true,
           "notice": "仅提供列出的8种混合模式；颜色透明度×opacity控制强度，保留原像素alpha。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
@@ -2061,54 +1390,13 @@ internal object ArtStudioMenuCatalog {
           "title": "颜色转透明度…",
           "implemented": true,
           "source": "plugins/filters/colors/kis_color_to_alpha.cpp",
-          "parameters": [
-            {
-              "name": "color",
-              "type": "string",
-              "description": "目标RGB色#AARRGGBB；此滤镜忽略色值中的alpha",
-              "default": "#FFFFFFFF"
-            },
-            {
-              "name": "tolerance",
-              "type": "number",
-              "description": "工作域RGB最大分量色差阈值，大于0且不超过1",
-              "default": 1
-            },
-            {
-              "name": "space",
-              "type": "string",
-              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
-              "default": "linear",
-              "choices": [
-                "linear",
-                "srgb"
-              ]
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝通道",
-              "default": true
-            },
-            {
-              "name": "alpha",
-              "type": "boolean",
-              "description": "处理透明度通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"color","type":"string","description":"目标RGB色#AARRGGBB；此滤镜忽略色值中的alpha","default":"#FFFFFFFF"},
+              {"name":"tolerance","type":"number","description":"工作域RGB最大分量色差阈值，大于0且不超过1","default":1},
+              {"name":"space","type":"string","description":"RGB工作域；linear为线性光，srgb为带符号扩展sRGB","default":"linear","choices":["linear","srgb"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true},
+              {"name":"alpha","type":"boolean","description":"处理透明度通道","default":true}],
           "documentWrite": true,
           "notice": "透明度乘以min(max(abs(RGB−目标色))/tolerance,1)，反合成恢复RGB。默认在线性光下保留叠回目标底色的结果；不是Krita的ICC色差度量。srgb模式在编码域反合成。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
@@ -2137,74 +1425,55 @@ internal object ArtStudioMenuCatalog {
           "title": "上边缘检测…",
           "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "parameters": [
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.edge_detection",
           "title": "边缘检测…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/edgedetection/kis_edge_detection_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [{"name":"type","type":"string","description":"导数核类型","default":"sobel","choices":["sobel","prewitt","simple"]},
+              {"name":"spacingX","type":"integer","description":"横向取样间距1–16像素","default":1},
+              {"name":"spacingY","type":"integer","description":"纵向取样间距1–16像素","default":1},
+              {"name":"heightChannel","type":"string","description":"高度来源通道","default":"luminance","choices":["luminance","red","green","blue","alpha"]},
+              {"name":"strength","type":"number","description":"高度导数强度0–1024","default":1},
+              {"name":"output","type":"string","description":"导数输出","default":"magnitude","choices":["magnitude","xGrowth","xFall","yGrowth","yFall","direction"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true}],
+          "documentWrite": true,
+          "notice": "稀疏3×3 Sobel／Prewitt或中心差分，spacing为采样间距，非Krita可变尺寸卷积核半径。RGB输出为所选高度通道的灰度边缘；保留alpha，零导数方向输出0。不是逐RGB通道和透明度边缘模式。 手机与filter.catalog发现、menu.preview预览、menu.execute应用共用此实现。"
         },
         {
           "id": "filter.height_to_normal_map",
           "title": "高度转法线贴图…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/convertheightnormalmap/kis_convert_height_to_normal_map_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [{"name":"type","type":"string","description":"导数核类型","default":"sobel","choices":["sobel","prewitt","simple"]},
+              {"name":"spacingX","type":"integer","description":"横向取样间距1–16像素","default":1},
+              {"name":"spacingY","type":"integer","description":"纵向取样间距1–16像素","default":1},
+              {"name":"heightChannel","type":"string","description":"高度来源通道","default":"luminance","choices":["luminance","red","green","blue","alpha"]},
+              {"name":"strength","type":"number","description":"高度导数强度0–1024","default":1},
+              {"name":"swizzle","type":"array","description":"输出RGB轴与符号：x+/x-/y+/y-/z+/z-，恰好3项","default":["x+","y+","z+"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true}],
+          "documentWrite": true,
+          "notice": "以归一化向量(-dx×strength,-dy×strength,1)生成线性RGB法线数据，保留alpha；边缘重复取样。spacing为稀疏采样间距，不是Krita可变核半径。 手机与filter.catalog发现、menu.preview预览、menu.execute应用共用此实现。"
         },
         {
           "id": "filter.gaussian_high_pass",
           "title": "高斯高通…",
           "implemented": true,
           "source": "plugins/filters/gaussianhighpass/gaussianhighpass_filter.cpp",
-          "parameters": [
-            {
-              "name": "sigma",
-              "type": "number",
-              "description": "模糊标准差 σ（0–128 px）",
-              "default": 3
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"sigma","type":"number","description":"模糊标准差 σ（0–128 px）","default":3},
+              {"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         }
@@ -2219,26 +1488,9 @@ internal object ArtStudioMenuCatalog {
           "title": "Emboss Horizontal  Vertical…",
           "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "parameters": [
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
@@ -2247,26 +1499,9 @@ internal object ArtStudioMenuCatalog {
           "title": "全方向浮雕…",
           "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "parameters": [
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
@@ -2275,32 +1510,10 @@ internal object ArtStudioMenuCatalog {
           "title": "可变深度浮雕…",
           "implemented": true,
           "source": "plugins/filters/embossfilter/kis_emboss_filter.cpp",
-          "parameters": [
-            {
-              "name": "depth",
-              "type": "number",
-              "description": "深度（10–300）",
-              "default": 30
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"depth","type":"number","description":"深度（10–300）","default":30},
+              {"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
@@ -2309,26 +1522,9 @@ internal object ArtStudioMenuCatalog {
           "title": "垂直浮雕…",
           "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "parameters": [
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
@@ -2337,26 +1533,9 @@ internal object ArtStudioMenuCatalog {
           "title": "拉普拉斯浮雕…",
           "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "parameters": [
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
@@ -2365,26 +1544,9 @@ internal object ArtStudioMenuCatalog {
           "title": "水平浮雕…",
           "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "parameters": [
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         }
@@ -2399,26 +1561,9 @@ internal object ArtStudioMenuCatalog {
           "title": "去除均值…",
           "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "parameters": [
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
@@ -2427,94 +1572,52 @@ internal object ArtStudioMenuCatalog {
           "title": "反锐化蒙版…",
           "implemented": true,
           "source": "plugins/filters/unsharp/kis_unsharp_filter.cpp",
-          "parameters": [
-            {
-              "name": "sigma",
-              "type": "number",
-              "description": "模糊标准差 σ（0–128 px）",
-              "default": 3
-            },
-            {
-              "name": "amount",
-              "type": "number",
-              "description": "锐化强度（0–10）",
-              "default": 1
-            },
-            {
-              "name": "threshold",
-              "type": "number",
-              "description": "线性亮度／通道差阈值（0–1）",
-              "default": 0
-            },
-            {
-              "name": "lightnessOnly",
-              "type": "boolean",
-              "description": "只增强线性亮度，保持通道差；非 Lab 模式",
-              "default": true
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"sigma","type":"number","description":"模糊标准差 σ（0–128 px）","default":3},
+              {"name":"amount","type":"number","description":"锐化强度（0–10）","default":1},
+              {"name":"threshold","type":"number","description":"线性亮度／通道差阈值（0–1）","default":0},
+              {"name":"lightnessOnly","type":"boolean","description":"只增强线性亮度，保持通道差；非 Lab 模式","default":true},
+              {"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.wavelet_noise_reducer",
           "title": "小波降噪…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/imageenhancement/kis_wavelet_noise_reduction.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [{"name":"threshold","type":"number","description":"线性RGB正交Haar系数阈值0–16","default":0.03},
+              {"name":"thresholdMode","type":"string","description":"系数阈值方式","default":"soft","choices":["soft","hard"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true}],
+          "documentWrite": true,
+          "notice": "独立RGB通道正交Haar分解，保留最粗低频并阈值化全部细节；矩形各轴补到2次幂，边缘重复，保留原alpha及透明像素。系数尺度与Krita的2D变换不同，阈值单位不能直接照搬。 手机与filter.catalog发现、menu.preview预览、menu.execute应用共用此实现。"
         },
         {
           "id": "filter.sharpen",
           "title": "锐化…",
           "implemented": true,
           "source": "plugins/filters/convolutionfilters/convolutionfilters.cpp",
-          "parameters": [
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红色通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿色通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝色通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"red","type":"boolean","description":"处理红色通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿色通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝色通道","default":true}],
           "documentWrite": true,
           "notice": "在线性浮点 RGB 空间处理，边缘重复取样；保留 HDR，不承诺与其他 ICC 工作空间的 Krita 逐像素一致。预览为当前图层，参数确认后才写入历史。"
         },
         {
           "id": "filter.gaussian_noise_reduction",
           "title": "高斯降噪…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/imageenhancement/kis_simple_noise_reducer.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [{"name":"sigma","type":"number","description":"高斯标准差0–32像素","default":1},
+              {"name":"threshold","type":"number","description":"线性直通RGB最大分量差阈值0–16","default":0.06},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true}],
+          "documentWrite": true,
+          "notice": "先高斯预乘模糊，仅当源RGB与模糊RGB最大分量差大于threshold时替换颜色，保留原alpha；透明中心不变。阈值不是Krita的ICC色差或8位阈值，卷积不是其圆形遮罩核。 手机与filter.catalog发现、menu.preview预览、menu.execute应用共用此实现。"
         }
       ]
     },
@@ -2525,49 +1628,61 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.phong_bumpmap",
           "title": "Phong 凹凸贴图…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/phongbumpmap/kis_phong_bumpmap_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [{"name":"type","type":"string","description":"导数核类型","default":"sobel","choices":["sobel","prewitt","simple"]},
+              {"name":"spacingX","type":"integer","description":"横向取样间距1–16像素","default":1},
+              {"name":"spacingY","type":"integer","description":"纵向取样间距1–16像素","default":1},
+              {"name":"heightChannel","type":"string","description":"高度来源通道","default":"luminance","choices":["luminance","red","green","blue","alpha"]},
+              {"name":"strength","type":"number","description":"高度导数强度0–1024","default":1},
+              {"name":"normalInput","type":"boolean","description":"直接把线性RGB数据作为法线图","default":false},
+              {"name":"material","type":"string","description":"材质颜色","default":"white","choices":["white","source"]},
+              {"name":"ambient","type":"number","description":"环境光0–1","default":0.1},
+              {"name":"diffuse","type":"number","description":"漫反射系数0–1","default":0.7},
+              {"name":"specular","type":"number","description":"镜面反射系数0–1","default":0.2},
+              {"name":"shininess","type":"number","description":"高光指数1–256","default":24},
+              {"name":"lights","type":"array","description":"定向灯数组0–4项：azimuth/elevation角度、color、intensity","default":[{"azimuth":135,"elevation":45,"color":"#FFFFFFFF","intensity":1}]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true}],
+          "documentWrite": true,
+          "notice": "标准Phong反射，视线朝+z，灯azimuth为−360–360度、从+x向+y，elevation为−90–90度、朝+z，强度0–16；颜色#AARRGGBB，alpha乘灯强度。法线输入RGB须0–1且向量非零；保留源alpha和HDR光强。与Krita旧高光公式、坐标和16位裁限不同。 手机与filter.catalog发现、menu.preview预览、menu.execute应用共用此实现。"
         },
         {
           "id": "filter.round_corners",
           "title": "圆角…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/roundcorners/kis_round_corners_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [{"name":"radius","type":"number","description":"圆角半径0–8192像素，实际不超过短边一半","default":30},
+              {"name":"antialias","type":"boolean","description":"圆角边缘1像素抗锯齿","default":true},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true},
+              {"name":"alpha","type":"boolean","description":"处理透明度通道","default":true}],
+          "documentWrite": true,
+          "notice": "按画布矩形生成圆角覆盖率，在线性预乘空间同时缩放RGBA；radius=0为恒等。几何使用像素中心，与Krita硬裁边界规则不同。 手机与filter.catalog发现、menu.preview预览、menu.execute应用共用此实现。"
         },
         {
           "id": "filter.small_tiles",
           "title": "小瓷砖…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/smalltilesfilter/kis_small_tiles_filter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [{"name":"numberOfTiles","type":"integer","description":"每轴重复次数1–16；每块至少1×1像素","default":2},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true},
+              {"name":"alpha","type":"boolean","description":"处理透明度通道","default":true}],
+          "documentWrite": true,
+          "notice": "整幅图按像素面积平均缩成floor(宽/n)×floor(高/n)瓷砖，双轴重复n次。画布末尾余数透明；选区仅混合最终结果，不改变瓷砖来源。 手机与filter.catalog发现、menu.preview预览、menu.execute应用共用此实现。"
         },
         {
           "id": "filter.normalize",
           "title": "归一化…",
           "implemented": true,
           "source": "plugins/filters/normalize/kis_normalize.cpp",
-          "parameters": [
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true}],
           "documentWrite": true,
           "notice": "法线贴图归一化：在线性RGB数据上将2×RGB−1作为向量，归一化后映回0–1；零向量输出(0.5,0.5,0.5)。保留alpha；不是亮度拉伸。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
@@ -2576,79 +1691,14 @@ internal object ArtStudioMenuCatalog {
           "title": "渐变映射…",
           "implemented": true,
           "source": "plugins/filters/gradientmap/KisGradientMapFilter.cpp",
-          "parameters": [
-            {
-              "name": "stops",
-              "type": "array",
-              "description": "渐变节点数组：position与线性直通rgba；2–16项",
-              "default": [
-                {
-                  "position": 0,
-                  "rgba": [
-                    0,
-                    0,
-                    0,
-                    1
-                  ]
-                },
-                {
-                  "position": 1,
-                  "rgba": [
-                    1,
-                    1,
-                    1,
-                    1
-                  ]
-                }
-              ]
-            },
-            {
-              "name": "inputBlack",
-              "type": "number",
-              "description": "输入线性亮度黑点−65504–65504",
-              "default": 0
-            },
-            {
-              "name": "inputWhite",
-              "type": "number",
-              "description": "输入线性亮度白点；必须大于黑点",
-              "default": 1
-            },
-            {
-              "name": "space",
-              "type": "string",
-              "description": "RGB工作域；linear为线性光，srgb为带符号扩展sRGB",
-              "default": "linear",
-              "choices": [
-                "linear",
-                "srgb"
-              ]
-            },
-            {
-              "name": "red",
-              "type": "boolean",
-              "description": "处理红通道",
-              "default": true
-            },
-            {
-              "name": "green",
-              "type": "boolean",
-              "description": "处理绿通道",
-              "default": true
-            },
-            {
-              "name": "blue",
-              "type": "boolean",
-              "description": "处理蓝通道",
-              "default": true
-            },
-            {
-              "name": "alpha",
-              "type": "boolean",
-              "description": "处理透明度通道",
-              "default": true
-            }
-          ],
+          "parameters": [{"name":"stops","type":"array","description":"渐变节点数组：position与线性直通rgba；2–16项","default":[{"position":0,"rgba":[0,0,0,1]},{"position":1,"rgba":[1,1,1,1]}]},
+              {"name":"inputBlack","type":"number","description":"输入线性亮度黑点−65504–65504","default":0},
+              {"name":"inputWhite","type":"number","description":"输入线性亮度白点；必须大于黑点","default":1},
+              {"name":"space","type":"string","description":"RGB工作域；linear为线性光，srgb为带符号扩展sRGB","default":"linear","choices":["linear","srgb"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true},
+              {"name":"alpha","type":"boolean","description":"处理透明度通道","default":true}],
           "documentWrite": true,
           "notice": "position严格递增且含0/1端点；rgba的RGB为有限线性HDR值±65504，alpha为0–1。以线性Rec.709亮度取样，在所选工作域预乘插值，渐变alpha乘原alpha。当前使用显式节点与平滑插值，不接资源库、最近色和抖动模式；alpha相乘与Krita取两者最小值的规则不同。 手机、menu.preview与menu.execute共用本实现。 原alpha为0的像素保持原值，含发光RGB；透明度曲线不填充空白。"
         },
@@ -2675,9 +1725,23 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.wave",
           "title": "波浪…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/wavefilter/wavefilter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [{"name":"amplitudeX","type":"number","description":"横向位移振幅−4096–4096像素","default":4},
+              {"name":"amplitudeY","type":"number","description":"纵向位移振幅−4096–4096像素","default":4},
+              {"name":"periodX","type":"number","description":"横向位移沿y轴的完整周期0.01–65536像素","default":50},
+              {"name":"periodY","type":"number","description":"纵向位移沿x轴的完整周期0.01–65536像素","default":50},
+              {"name":"phaseX","type":"number","description":"横向相位角−360–360度","default":0},
+              {"name":"phaseY","type":"number","description":"纵向相位角−360–360度","default":0},
+              {"name":"shapeX","type":"string","description":"横向波形","default":"sine","choices":["sine","triangle"]},
+              {"name":"shapeY","type":"string","description":"纵向波形","default":"sine","choices":["sine","triangle"]},
+              {"name":"border","type":"string","description":"越界取样：repeat边缘重复、wrap环绕、transparent透明","default":"repeat","choices":["repeat","wrap","transparent"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true},
+              {"name":"alpha","type":"boolean","description":"处理透明度通道","default":true}],
+          "documentWrite": true,
+          "notice": "从不可变输入做线性预乘双线性取样。period为完整周期、phase为角度，与Krita源码的wavelength／shift参数单位不同；三角波为连续的标准三角波。 手机与filter.catalog发现、menu.preview预览、menu.execute应用共用此实现。"
         },
         {
           "id": "filter.resettransparent",
@@ -2690,16 +1754,35 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "filter.random_noise",
           "title": "随机噪点…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/noisefilter/noisefilter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [{"name":"level","type":"number","description":"像素选中概率百分比0–100","default":50},
+              {"name":"opacity","type":"number","description":"与原像素混合比例百分比0–100","default":100},
+              {"name":"grayscale","type":"boolean","description":"灰度噪点","default":false},
+              {"name":"seed","type":"integer","description":"固定随机种子，32位有符号整数；同参数可复现","default":0},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true},
+              {"name":"alpha","type":"boolean","description":"处理透明度通道","default":true}],
+          "documentWrite": true,
+          "notice": "被选像素混合确定性sRGB随机色，颜色转为线性后以预乘RGBA混合；噪点色alpha为1，因此默认可在透明区域生效。种子哈希算法不同于Krita。 手机与filter.catalog发现、menu.preview预览、menu.execute应用共用此实现。"
         },
         {
           "id": "filter.random_pick",
           "title": "随机拾取…",
-          "implemented": false,
+          "implemented": true,
           "source": "plugins/filters/randompickfilter/randompickfilter.cpp",
-          "reason": "尚未接入此滤镜的处理算法、参数/预设或 G’MIC 引擎"
+          "parameters": [{"name":"level","type":"number","description":"像素选中概率百分比0–100","default":50},
+              {"name":"opacity","type":"number","description":"与原像素混合比例百分比0–100","default":100},
+              {"name":"windowsize","type":"number","description":"随机取样窗口宽0–4096像素","default":2.5},
+              {"name":"seed","type":"integer","description":"固定随机种子，32位有符号整数；同参数可复现","default":0},
+              {"name":"border","type":"string","description":"越界取样：repeat边缘重复、wrap环绕、transparent透明","default":"repeat","choices":["repeat","wrap","transparent"]},
+              {"name":"red","type":"boolean","description":"处理红通道","default":true},
+              {"name":"green","type":"boolean","description":"处理绿通道","default":true},
+              {"name":"blue","type":"boolean","description":"处理蓝通道","default":true},
+              {"name":"alpha","type":"boolean","description":"处理透明度通道","default":true}],
+          "documentWrite": true,
+          "notice": "窗口内随机双线性取样，再以预乘RGBA混合；固定种子和画布坐标决定结果，不读取正在修改的输出。不同于Krita整数位置取样及其随机算法。 手机与filter.catalog发现、menu.preview预览、menu.execute应用共用此实现。"
         }
       ]
     },

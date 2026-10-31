@@ -124,4 +124,40 @@ class ArtMenuFilterAndroidTest {
         val absent=ArtStudioMenuCatalog.filters(store.menuContext(),"filter.color_transfer").getJSONArray("filters").getJSONObject(0)
         assertFalse(absent.getBoolean("implemented"));assertFalse(absent.has("calls"))
     }
+    @Test fun seededSpatialFilterIsSharedByPreviewAiAndPhoneWithSingleUndoableEdit() {
+        val s=seeded();val before=pixels(s);val assets=File(directory,"assets").list()?.toSet()
+        val config=JSONObject().put("seed",57).put("level",100).put("opacity",30)
+        val p=request(s).apply {config.keys().forEach {put(it,config.get(it))}}
+        val preview=store.previewMenuBitmap("filter.random_noise",p);preview.recycle()
+        assertEquals(s.getInt("revision"),store.menuContext().getJSONObject("document").getInt("revision"))
+        assertEquals(assets,File(directory,"assets").list()?.toSet())
+        val ai=store.executeMenu("LANER","filter.random_noise",p)
+        assertEquals(s.getInt("revision")+1,ai.getInt("revision"))
+        assertEquals(57,ai.getJSONObject("state").getJSONObject("lastFilter").getJSONObject("parameters").getInt("seed"))
+        val expected=ArtSpatialFilters.process("filter.random_noise",before,8,8,config)
+        val aiPixels=pixels(ai);assertArrayEquals(expected,aiPixels,.01f)
+        val undone=store.history("LANER",true);assertArrayEquals(before,pixels(undone),0f)
+        val phone=store.executeMenu("AWEI","filter.random_noise",request(undone).apply {config.keys().forEach {put(it,config.get(it))}})
+        assertArrayEquals(aiPixels,pixels(phone),0f)
+    }
+    @Test fun surfaceFilterUsesPremultipliedSelectionMixing() {
+        val source=floatArrayOf(1f,1f,1f,1f, 1f,1f,1f,1f)
+        val bitmap=ArtFloatPixels.from(2,1,source)
+        try {
+            val selection=JSONObject().put("shape","rect").put("x",1).put("y",0).put("width",1).put("height",1)
+            ArtMenuOperations.filter(bitmap,"filter.height_to_normal_map",JSONObject(),selection)
+            val out=ArtFloatPixels.read(bitmap)
+            assertArrayEquals(source.copyOfRange(0,4),out.copyOfRange(0,4),0f)
+            assertArrayEquals(floatArrayOf(.5f,.5f,1f,1f),out.copyOfRange(4,8),.001f)
+        } finally {bitmap.recycle()}
+    }
+    @Test fun spatialDiscoveryProvidesStructuredLightingAndSeededCallTemplates() {
+        seeded();val context=store.menuContext()
+        val noise=ArtStudioMenuCatalog.filters(context,"filter.random_noise").getJSONArray("filters").getJSONObject(0)
+        val args=noise.getJSONObject("calls").getJSONObject("preview").getJSONObject("parameters")
+        assertEquals(0,args.getJSONObject("parameters").getInt("seed"))
+        val phong=ArtStudioMenuCatalog.filters(context,"filter.phong_bumpmap").getJSONArray("filters").getJSONObject(0)
+        val lights=phong.getJSONObject("calls").getJSONObject("apply").getJSONObject("parameters").getJSONObject("parameters").getJSONArray("lights")
+        assertEquals(1,lights.length());assertEquals(45,lights.getJSONObject(0).getInt("elevation"))
+    }
 }

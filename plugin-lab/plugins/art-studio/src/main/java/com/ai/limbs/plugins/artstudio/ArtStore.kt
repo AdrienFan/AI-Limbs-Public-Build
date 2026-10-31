@@ -1080,6 +1080,9 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             }
             "filter.invert", "filter.desaturate", "filter.threshold", "filter.posterize", "filter.maximize",
             "filter.minimize", "filter.resettransparent",
+            "filter.pixelize", "filter.oilpaint", "filter.wave", "filter.small_tiles", "filter.round_corners",
+            "filter.random_noise", "filter.random_pick", "filter.raindrops", "filter.edge_detection",
+            "filter.height_to_normal_map", "filter.phong_bumpmap", "filter.gaussian_noise_reduction", "filter.wavelet_noise_reducer",
             "filter.hsv_adjustment", "filter.dodge", "filter.burn", "filter.slope_offset_power",
             "filter.auto_contrast", "filter.color_balance", "filter.levels", "filter.cross_channel_adjustment_curves",
             "filter.color_adjustment_curves", "filter.fast_color_overlay", "filter.color_to_alpha", "filter.normalize", "filter.gradient_map",

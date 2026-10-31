@@ -57,6 +57,13 @@ print(
 CATALOG = ENTRY.with_name('ArtStudioMenuCatalog.kt')
 STORE = ENTRY.with_name('ArtStore.kt')
 parts = re.findall(r'"""(.*?)"""', CATALOG.read_text(encoding='utf-8'), re.S)
+# JVM CONSTANT_Utf8 uses modified UTF-8; long translated parameter help can exceed
+# the constant-pool limit even when the Kotlin file itself looks ordinary.
+for part in parts:
+    modified_utf8_size = sum(2 if ord(c) == 0 else 1 if ord(c) <= 0x7f else
+                            2 if ord(c) <= 0x7ff else 3 if ord(c) <= 0xffff else 6 for c in part)
+    if modified_utf8_size > 65535:
+        raise SystemExit('Art Studio menu metadata exceeds the JVM string constant limit')
 menus = [json.loads(part) for part in parts]
 expected = ['图层', '选择', '滤镜', '工具', '设置', '窗口', '帮助']
 if [m['title'] for m in menus] != expected:
