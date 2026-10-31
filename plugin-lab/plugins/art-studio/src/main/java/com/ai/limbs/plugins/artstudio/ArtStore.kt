@@ -695,6 +695,52 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             .put("settings", readMenuSettings()).put("dockPanels", readDockPanels()).put("storage", saveDirectories.describe())
     }
 
+    fun filterResources():JSONObject=locked {
+        val colors=colorState()
+        JSONObject().put("paletteRevision",colors.getLong("revision"))
+            .put("palettes",JSONArray(colors.getJSONArray("palettes").toString()))
+            .put("patterns",JSONArray(listOf("dots","lines","diamonds")))
+            .put("usage","palette直接传颜色数组；ramps每4色一坡，最多4坡。参数为资源值快照，不跟随之后的资源修改。filter.reference从指定工程修订读取参考层的D65 Lab统计。")
+            .put("historyWritten",false)
+    }
+    fun filterReference(p:JSONObject):JSONObject=locked {
+        val snap=selectionRequest(p);val state=snap.getJSONObject("state")
+        val id=p.getString("layerId")
+        val layer=ArtMenuOperations.layers(state).firstOrNull {it.getString("id")==id} ?: error("参考图层不存在")
+        require(layer.optString("parentId").isBlank() && layer.getString("kind") in setOf("paint","image","group","vector")) {"请选择绘画、图像、矢量或组的根图层作为参考"}
+        val ids=ArtMenuOperations.subtree(state,id).map {it.getString("id")}.toSet()
+        val bitmap=ArtRenderer.render(this,ArtMenuOperations.isolated(snap,ids,id))
+        val stats=try {ArtImagePolicy.requireBytes(bitmap.width.toLong()*bitmap.height*64,"滤镜参考统计")
+            ArtResourceFilters.statistics(ArtFloatPixels.read(bitmap))} finally {bitmap.recycle()}
+        val provenance=JSONObject().put("documentId",snap.getString("id")).put("revision",snap.getInt("revision")).put("layerId",id)
+        JSONObject().put("referenceStats",stats.json().put("provenance",provenance))
+            .put("sampleWeight",stats.weight).put("layerName",layer.getString("name")).put("historyWritten",false)
+    }
+    private fun readFilterHidden(layer:JSONObject,w:Int,h:Int):FloatArray? {
+        if(!layer.has("hiddenColors"))return null
+        ArtImagePolicy.requireBytes(w.toLong()*h*128,"滤镜与隐藏颜色")
+        val metadata=layer.getJSONObject("hiddenColors")
+        require(metadata.getInt("width")==w && metadata.getInt("height")==h) {"隐藏颜色与画布尺寸不一致"}
+        val bitmap=ArtImagePolicy.decodeAsset(assetFile(metadata.getString("asset")))
+        return try {
+            require(bitmap.width==w && bitmap.height==h) {"隐藏颜色资源尺寸不一致"}
+            ArtFloatPixels.read(bitmap).also {ArtHiddenColors.validatePixels(it,w*h*4)}
+        } finally {bitmap.recycle()}
+    }
+    fun filterHidden(p:JSONObject):JSONObject=locked {
+        val snap=selectionRequest(p);val state=snap.getJSONObject("state")
+        val layer=ArtMenuOperations.layers(state).firstOrNull {it.getString("id")==p.getString("layerId")} ?: error("图层不存在")
+        val x=p.getInt("x");val y=p.getInt("y");val w=state.getInt("width");val h=state.getInt("height")
+        require(x in 0 until w && y in 0 until h)
+        val plane=readFilterHidden(layer,w,h);val i=(y*w+x)*4
+        val valid=plane!=null && plane[i+3]>0
+        val color=if(valid) {val values=requireNotNull(plane);JSONArray((0..2).map {values[i+it]/values[i+3]})} else JSONObject.NULL
+        JSONObject().put("documentId",snap.getString("id")).put("revision",snap.getInt("revision"))
+            .put("layerId",layer.getString("id")).put("x",x).put("y",y).put("hasHiddenColor",valid)
+            .put("linearRGB",color)
+            .put("coordinateSpace","stored-canvas").put("historyWritten",false)
+    }
+
     fun menuUiState(): JSONObject = locked {
         val clipboard = clipboardInfo()
         JSONObject().put("clipboardWidth", clipboard.optInt("width"))
@@ -1080,6 +1126,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             }
             "filter.invert", "filter.desaturate", "filter.threshold", "filter.posterize", "filter.maximize",
             "filter.minimize", "filter.resettransparent",
+            "filter.halftone", "filter.index_colors", "filter.propagate_colors", "filter.color_transfer", "filter.palettize",
             "filter.pixelize", "filter.oilpaint", "filter.wave", "filter.small_tiles", "filter.round_corners",
             "filter.random_noise", "filter.random_pick", "filter.raindrops", "filter.edge_detection",
             "filter.height_to_normal_map", "filter.phong_bumpmap", "filter.gaussian_noise_reduction", "filter.wavelet_noise_reducer",
@@ -1142,7 +1189,8 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         val selected=requireNotNull(ArtMenuOperations.active(state))
         val rendered=ArtRenderer.render(this,ArtMenuOperations.isolated(snap,setOf(selected.getString("id")),selected.getString("id")))
         try {
-            ArtMenuOperations.filter(rendered,resolved,p,state.optJSONObject("selection"))
+            ArtMenuOperations.filter(rendered,resolved,p,state.optJSONObject("selection"),
+                if(resolved in ArtResourceFilters.ids)readFilterHidden(selected,rendered.width,rendered.height) else null)
             val scale=minOf(1.0,maxEdge.toDouble()/maxOf(rendered.width,rendered.height))
             val output=Bitmap.createBitmap(maxOf(1,(rendered.width*scale).toInt()),maxOf(1,(rendered.height*scale).toInt()),Bitmap.Config.ARGB_8888)
             try {
@@ -1172,14 +1220,27 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         require(ArtMenuOperations.pixelsEditable(state)) { "滤镜需要可见、未锁定且未经变换的根像素图层" }
         val selected=requireNotNull(ArtMenuOperations.active(state)); val id=selected.getString("id")
         val bitmap=ArtRenderer.render(this,ArtMenuOperations.isolated(snap,setOf(id),id))
-        val layer = try {
-            ArtMenuOperations.filter(bitmap,action,p,state.optJSONObject("selection"))
-            raster(bitmap,id,selected.getString("name"))
-        } catch (error: Throwable) { if (!bitmap.isRecycled) bitmap.recycle(); throw error }
-        layer.put("opacity",selected.getDouble("opacity")).put("blend",selected.getString("blend"))
-        val clean = JSONObject(p.toString()).apply { remove("expectedRevision"); remove("documentId") }
-        return change(listOf(id),listOf(layer),ArtMenuOperations.layers(state).indexOf(selected),id,label,null,
-            JSONObject().put("action",action).put("parameters",clean))
+        val created=mutableListOf<String>()
+        try {
+            val hidden=ArtMenuOperations.filter(bitmap,action,p,state.optJSONObject("selection"),
+                if(action in ArtResourceFilters.ids)readFilterHidden(selected,bitmap.width,bitmap.height) else null)
+            val layer=raster(bitmap,id,selected.getString("name"))
+            ArtMenuOperations.assets(layer) {node,key->created.add(node.getString(key))}
+            if(hidden!=null) {
+                val plane=ArtFloatPixels.from(state.getInt("width"),state.getInt("height"),hidden)
+                val bytes=try {ArtImagePolicy.encodeAsset(plane,MAX_ASSET_BYTES)}finally {plane.recycle()}
+                val asset=UUID.randomUUID().toString();created.add(asset);atomicBytes(assetFile(asset),bytes)
+                layer.put("hiddenColors",JSONObject().put("format",1).put("asset",asset)
+                    .put("width",state.getInt("width")).put("height",state.getInt("height")))
+            }
+            layer.put("opacity",selected.getDouble("opacity")).put("blend",selected.getString("blend"))
+            val clean = JSONObject(p.toString()).apply { remove("expectedRevision"); remove("documentId") }
+            return change(listOf(id),listOf(layer),ArtMenuOperations.layers(state).indexOf(selected),id,label,null,
+                JSONObject().put("action",action).put("parameters",clean))
+        } catch (error: Throwable) {
+            if (!bitmap.isRecycled) bitmap.recycle()
+            created.forEach {assetFile(it).delete()};throw error
+        }
     }
 
     fun revision(): String = locked {
@@ -2836,6 +2897,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         ArtAssistants.validate(state)
         ArtColorize.validate(state)
         ArtSelectionMasks.validate(state)
+        ArtHiddenColors.validate(state)
         state.optJSONObject("selection")?.let {ArtSelection.validate(it)}
         state.optJSONObject("previousSelection")?.let {ArtSelection.validate(it)}
         return state
@@ -2866,7 +2928,14 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         // capture() installs a deep-copied cel after the edit, so inactive cels stay independent.
         val tracks=animated.associate {it.getString("id") to Pair(it.getString("kind"),requireNotNull(ArtAnimation.keys(it)))}
         val before=ArtAnimation.before(state)
+        val hiddenDimensions=state.getInt("width") to state.getInt("height")
+        val hiddenBefore=ArtAnimation.layers(state).filter {it.has("hiddenColors")}
+            .associate {it.getString("id") to ArtHiddenColors.basis(it)}
         editNative(state,type,p)
+        if(type!="MENU_LAYER_CHANGE")ArtAnimation.layers(state).forEach {layer->
+            hiddenBefore[layer.getString("id")]?.let {basis->if(ArtHiddenColors.basis(layer)!=basis ||
+                hiddenDimensions!=(state.getInt("width") to state.getInt("height")))layer.remove("hiddenColors")}
+        }
         // A filter may replace the active layer object; its committed track remains the same track.
         ArtAnimation.layers(state).forEach {layer->
             tracks[layer.getString("id")]?.let {(kind,keys)->

@@ -172,11 +172,14 @@ internal object ArtMenuOperations {
         .put("asset", "").put("strokes", JSONArray())
         .put("contentOrder", JSONArray().put(JSONObject().put("kind", "paste").put("asset", asset).put("x", 0).put("y", 0)))
 
-    fun filter(bitmap: Bitmap, action: String, p: JSONObject, selection: JSONObject?) {
+    fun filter(bitmap: Bitmap, action: String, p: JSONObject, selection: JSONObject?, hidden:FloatArray?=null):FloatArray? {
         if(action in ArtNeighborhoodFilters.ids || action in ArtColorFilters.ids ||
-            action in ArtSpatialFilters.ids || action in ArtSurfaceFilters.ids) {
+            action in ArtSpatialFilters.ids || action in ArtSurfaceFilters.ids || action in ArtResourceFilters.ids) {
             val input=ArtFloatPixels.read(bitmap)
+            val resource=if(action in ArtResourceFilters.ids)
+                ArtResourceFilters.process(action,input,bitmap.width,bitmap.height,p,hidden,ArtImagePolicy.budgetBytes()) else null
             val filtered=when(action) {
+                in ArtResourceFilters.ids -> requireNotNull(resource).pixels
                 in ArtColorFilters.ids -> ArtColorFilters.process(action,input,bitmap.width,bitmap.height,p,ArtImagePolicy.budgetBytes())
                 in ArtSpatialFilters.ids -> ArtSpatialFilters.process(action,input,bitmap.width,bitmap.height,p,ArtImagePolicy.budgetBytes())
                 in ArtSurfaceFilters.ids -> ArtSurfaceFilters.process(action,input,bitmap.width,bitmap.height,p,ArtImagePolicy.budgetBytes())
@@ -184,6 +187,7 @@ internal object ArtMenuOperations {
             }
             val coverage=selection?.takeIf {it.has("coverage")}?.let {ArtSoftSelection.Sampler(it)}
             val region=selection?.takeIf {!it.has("coverage")}?.let {Region().apply {setPath(ArtSelection.path(it),Region(0,0,bitmap.width,bitmap.height))}}
+            val hiddenResult=resource?.hidden
             // Read the entire neighborhood first; apply the selection only to the final output.
             for(y in 0 until bitmap.height) {
                 if(Thread.currentThread().isInterrupted)throw java.util.concurrent.CancellationException("滤镜已取消")
@@ -191,10 +195,14 @@ internal object ArtMenuOperations {
                     val amount=if(region!=null && !region.contains(x,y))0f else (coverage?.at(x+.5,y+.5) ?: 255)/255f
                     val i=(y*bitmap.width+x)*4
                     for(c in 0..3)input[i+c]=input[i+c]*(1-amount)+filtered[i+c]*amount
+                    hiddenResult?.let {plane->
+                        for(c in 0..3)plane[i+c]=(hidden?.get(i+c) ?: 0f)*(1-amount)+plane[i+c]*amount
+                        if(input[i+3]>0)for(c in 0..3)plane[i+c]=0f
+                    }
                 }
             }
             ArtFloatPixels.write(bitmap,input)
-            return
+            return hiddenResult?.takeIf {ArtHiddenColors.hasPixels(it)}
         }
         val threshold = p.optInt("threshold", 128)
         val steps = p.optInt("steps", 16)
@@ -228,6 +236,7 @@ internal object ArtMenuOperations {
             for(c in 0..3)pixels[i+c]=pixels[i+c]*(1-amount)+(if(c==3)result[3] else result[c]*result[3])*amount
         }
         ArtFloatPixels.write(bitmap,pixels)
+        return null
     }
 
     fun luma(c: Int): Int = (Color.red(c)*0.2126 + Color.green(c)*0.7152 + Color.blue(c)*0.0722).roundToInt()

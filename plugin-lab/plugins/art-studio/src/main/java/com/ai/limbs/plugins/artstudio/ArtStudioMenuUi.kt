@@ -81,7 +81,9 @@ internal fun showStudioRemainingMenu(context: Context, anchor: View, title: Stri
 
 @Composable
 internal fun StudioMenuParameters(item: JSONObject, initial: JSONObject,
-    onDismiss: () -> Unit, onPreview: ((JSONObject) -> Bitmap)? = null, onExecute: (JSONObject) -> Unit) {
+    onDismiss: () -> Unit, onPreview: ((JSONObject) -> Bitmap)? = null,
+    filterResources:JSONObject?=null, referenceLayers:JSONArray=JSONArray(), onReference:((String)->JSONObject)?=null,
+    onExecute: (JSONObject) -> Unit) {
     val specs = item.optJSONArray("parameters") ?: JSONArray()
     val values = remember(item) { mutableStateMapOf<String,String>().apply {
         for (n in 0 until specs.length()) {
@@ -126,6 +128,15 @@ internal fun StudioMenuParameters(item: JSONObject, initial: JSONObject,
                         TextButton(onClick={values[key]=choice}) { Text((if(values[key]==choice) "✓ " else "")+choice) }
                     }
                 } else {
+                    if(key in setOf("palette","ramps") && filterResources!=null)
+                        StudioFilterPalette(key,filterResources.getJSONArray("palettes")) {values[key]=it;error=null}
+                    if(key=="referenceStats" && onReference!=null) {
+                        val referenceInput=values.getValue(key)
+                        StudioFilterReference(referenceLayers,onReference) {
+                            if(values[key]==referenceInput) {values[key]=it.toString();error=null;true}
+                            else {error="参数已经修改，未覆盖刚才的参考统计";false}
+                        }
+                    }
                     if(key in setOf("curves","rules")) StudioFilterCurves(key,values.getValue(key),
                         values["interpolation"] ?: "smooth") {values[key]=it;error=null}
                     OutlinedTextField(value=values.getValue(key),onValueChange={values[key]=it;error=null},

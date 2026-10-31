@@ -1797,10 +1797,13 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         !menuActive.has("affine") && menuActive.optDouble("scale") == 1.0 && menuActive.optDouble("rotation") == 0.0
     val menuClipboardCanNew = ArtImagePolicy.dimensionsValid(clipboardSize.first, clipboardSize.second)
 
+    val filterPaletteSnapshot=if(colorWorkspaceReady)JSONObject().put("paletteRevision",colorWorkspace.getLong("revision"))
+        .put("palettes",colorWorkspace.getJSONArray("palettes")) else JSONObject.NULL
     SideEffect {
         menuBridge.menuContext=JSONObject(remainingContext.toString()).put("dockPanels", dockPanelState)
             .put("document", current ?: JSONObject.NULL)
             .put("layerClipboard",remainingContext.optBoolean("layerClipboard"))
+            .put("filterResources",filterPaletteSnapshot)
             .put("settings",remainingContext.optJSONObject("settings")?.let { JSONObject(it.toString()) }
                 ?.put("panelsHidden",viewOptions.panelsHidden) ?: JSONObject()
                 .put("selectionVisible",true).put("panelsHidden",false).put("brushWidth",6.0).put("brushOpacity",1.0))
@@ -3860,7 +3863,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             store.previewMenuBitmap(item.getString("id"),JSONObject(parameters.toString())
                 .put("documentId",doc.getString("id")).put("expectedRevision",doc.getInt("revision")))
         } else null
-        StudioMenuParameters(item,remainingDefaults,onDismiss={remainingDialog=null},onPreview=preview) { parameters ->
+        val referenceLayers=JSONArray().apply {previewDocument?.getJSONObject("state")?.getJSONArray("layers")?.let {layers->
+            for(i in 0 until layers.length()) {val layer=layers.getJSONObject(i)
+                if(layer.optString("parentId").isBlank() && layer.getString("kind") in setOf("paint","image","vector","group"))put(layer)}
+        }}
+        val referenceReader:((String)->JSONObject)?=previewDocument?.let {doc->{layerId->
+            store.filterReference(JSONObject().put("documentId",doc.getString("id"))
+                .put("expectedRevision",doc.getInt("revision")).put("layerId",layerId))
+        }}
+        StudioMenuParameters(item,remainingDefaults,onDismiss={remainingDialog=null},onPreview=preview,
+            filterResources=remainingCaptured.optJSONObject("filterResources"),referenceLayers=referenceLayers,onReference=referenceReader) { parameters ->
             val captured=remainingCaptured
             remainingDialog=null
             executeRemaining(item,captured,parameters)

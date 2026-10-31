@@ -83,6 +83,7 @@ internal object ArtAnimation {
             if(action=="blank") {
                 cel.put("asset","").put("strokes",JSONArray())
                 cel.remove("pixelEdits");cel.remove("contentOrder")
+                cel.remove("hiddenColors")
                 if(layer.getString("kind")=="vector")cel.put("shapes",JSONArray())
                 if(layer.getString("kind")=="colorize") {
                     val data=cel.getJSONObject("colorize");data.put("keys",JSONArray()).put("palette",JSONArray())

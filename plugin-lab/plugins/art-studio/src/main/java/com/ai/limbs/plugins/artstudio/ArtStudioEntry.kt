@@ -109,6 +109,9 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("filter.catalog", "查询滤镜参数及兰儿的预览／应用调用格式", read) { p ->
             ArtStudioMenuCatalog.filters(store.menuContext(),if(p.has("action"))p.getString("action") else null)
         }
+        capability("filter.resources", "读取共享调色板和半色调图案种类", read) {store.filterResources()}
+        capability("filter.reference", "读取参考根图层的颜色迁移统计快照", read) {p->store.filterReference(p)}
+        capability("filter.hidden", "读取图层独立隐藏颜色，不将它当作可见像素", read) {p->store.filterHidden(p)}
         capability("menu.preview", "只读预览当前图层的滤镜结果", read) { p ->
             val arguments=JSONObject(p.optJSONObject("parameters")?.toString() ?: "{}")
                 .put("documentId",p.getString("documentId")).put("expectedRevision",p.getInt("expectedRevision"))
@@ -795,6 +798,9 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             p("x", "number", true), p("y", "number", true)) + if (name == "text.update") listOf(id) else emptyList()
         "menu.preview" -> listOf(p("action"),p("parameters","object",true),p("documentId"),p("expectedRevision","integer"),p("maxEdge","integer",true))
         "filter.catalog" -> listOf(p("action",optional=true))
+        "filter.resources" -> emptyList()
+        "filter.reference" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"))
+        "filter.hidden" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("x","integer"),p("y","integer"))
         "menu.execute" -> listOf(p("action"), p("parameters", "object", true),
             p("documentId", optional = true), p("expectedRevision", "integer", true))
         "image.set_background" -> listOf(p("color"))

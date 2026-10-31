@@ -41,7 +41,7 @@ class ArtMenuFilterAndroidTest {
         val changed=store.executeMenu("AWEI","filter.gaussian_blur",request(s).put("sigmaX",1).put("sigmaY",1))
         assertEquals(s.getInt("revision")+1,changed.getInt("revision"))
         assertArrayEquals(before,pixels(changed),.01f)
-        val undone=store.history("AWEI",true)
+        val undone=store.history("AWEI",redo=false)
         assertArrayEquals(before,pixels(undone),0f)
     }
     @Test fun stalePreviewAndCommitBothReject() {
@@ -87,8 +87,8 @@ class ArtMenuFilterAndroidTest {
         val repeated=store.executeMenu("LANER","filter_apply_again",request(changed))
         val twice=pixels(repeated)
         assertEquals(32f,twice[0]/twice[3],.04f);assertEquals(.25f,twice[3],.001f)
-        assertArrayEquals(once,pixels(store.history("LANER",true)),0f)
-        assertArrayEquals(before,pixels(store.history("LANER",true)),0f)
+        assertArrayEquals(once,pixels(store.history("LANER",redo=false)),0f)
+        assertArrayEquals(before,pixels(store.history("LANER",redo=false)),0f)
     }
     @Test fun colorFilterHonorsSelectionAndInvalidNestedConfigCannotWrite() {
         val source=floatArrayOf(.5f,.5f,.5f,1f, .5f,.5f,.5f,1f)
@@ -121,8 +121,9 @@ class ArtMenuFilterAndroidTest {
         assertEquals(s.getInt("revision"),args.getInt("expectedRevision"))
         val rules=args.getJSONObject("parameters").getJSONArray("rules")
         assertEquals(.5,rules.getJSONObject(0).getJSONArray("points").getJSONArray(0).getDouble(1),0.0)
-        val absent=ArtStudioMenuCatalog.filters(store.menuContext(),"filter.color_transfer").getJSONArray("filters").getJSONObject(0)
-        assertFalse(absent.getBoolean("implemented"));assertFalse(absent.has("calls"))
+        val transfer=ArtStudioMenuCatalog.filters(store.menuContext(),"filter.color_transfer").getJSONArray("filters").getJSONObject(0)
+        assertTrue(transfer.getBoolean("implemented"));assertTrue(transfer.has("calls"))
+        assertThrows(IllegalArgumentException::class.java) {ArtStudioMenuCatalog.filters(store.menuContext(),"filter.unknown")}
     }
     @Test fun seededSpatialFilterIsSharedByPreviewAiAndPhoneWithSingleUndoableEdit() {
         val s=seeded();val before=pixels(s);val assets=File(directory,"assets").list()?.toSet()
@@ -136,7 +137,7 @@ class ArtMenuFilterAndroidTest {
         assertEquals(57,ai.getJSONObject("state").getJSONObject("lastFilter").getJSONObject("parameters").getInt("seed"))
         val expected=ArtSpatialFilters.process("filter.random_noise",before,8,8,config)
         val aiPixels=pixels(ai);assertArrayEquals(expected,aiPixels,.01f)
-        val undone=store.history("LANER",true);assertArrayEquals(before,pixels(undone),0f)
+        val undone=store.history("LANER",redo=false);assertArrayEquals(before,pixels(undone),0f)
         val phone=store.executeMenu("AWEI","filter.random_noise",request(undone).apply {config.keys().forEach {put(it,config.get(it))}})
         assertArrayEquals(aiPixels,pixels(phone),0f)
     }
