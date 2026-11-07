@@ -13,8 +13,14 @@ internal class AuditStore(dir: File) : AutoCloseable {
     init {
         dir.mkdirs()
         db = SQLiteDatabase.openOrCreateDatabase(File(dir, "privacy-audit-v1.db"), null)
-        db.execSQL("PRAGMA journal_mode=WAL")
-        db.execSQL("PRAGMA secure_delete=ON")
+        // WAL is configured through Android's supported API, not execSQL(PRAGMA ...).
+        db.enableWriteAheadLogging()
+        // This PRAGMA returns a row: use a query and verify privacy-safe deletion is enabled.
+        db.rawQuery("PRAGMA secure_delete=ON", null).use { cursor ->
+            check(cursor.moveToFirst() && cursor.getInt(0) == 1) {
+                "Unable to enable SQLite secure_delete for the local audit database"
+            }
+        }
         db.execSQL("CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL)")
         db.execSQL("CREATE TABLE IF NOT EXISTS apps(k TEXT PRIMARY KEY, body TEXT NOT NULL)")
         db.execSQL("CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL, prev TEXT NOT NULL, hash TEXT NOT NULL)")

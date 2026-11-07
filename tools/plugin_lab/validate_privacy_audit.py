@@ -36,4 +36,10 @@ settings = (ROOT / "privacy-audit-build/settings.gradle.kts").read_text()
 assert 'include(":plugin-inprocess-api", ":privacy-audit-plugin")' in settings
 for script in ("package_privacy_audit.py", "validate_privacy_audit.py"):
     ast.parse((ROOT / "tools/plugin_lab" / script).read_text())
+# SQLite PRAGMA queries may return result rows. execSQL() rejects result-producing statements at runtime.
+store_source = (source_dir / "AuditStore.kt").read_text()
+assert not re.search(r'\.execSQL\s*\(\s*"PRAGMA\b', store_source, re.IGNORECASE)
+assert 'db.enableWriteAheadLogging()' in store_source
+assert 'db.rawQuery("PRAGMA secure_delete=ON", null)' in store_source
+
 print("PASS: plugin identity, ABI declarations, isolated build, manifest and signing script contracts")
