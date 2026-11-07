@@ -1,0 +1,19 @@
+Xt stats:
+  ident=[{type=1, subscriberId=synthetic}] uid=-1 set=ALL tag=0x0
+    st=123456 rb=99999 tb=99999
+UID stats:
+  History since boot:
+  ident=[{type=1, subscriberId=synthetic}] uid=10001 set=FOREGROUND tag=0x0
+    NetworkStatsHistory: bucketDuration=7200
+      st=123456 rb=10 rp=1 tb=20 tp=1 op=0
+  ident=[{type=0, subscriberId=synthetic}] uid=10001 set=DEFAULT tag=0x0
+      st=123456 rb=30 rp=1 tb=40 tp=1 op=0
+  ident=[{type=17, subscriberId=synthetic}] uid=10001 set=DEFAULT tag=0x0
+      st=123456 rb=900 rp=1 tb=900 tp=1 op=0
+  ident=[{type=1, subscriberId=synthetic}] uid=10001 set=DBG_VPN_IN tag=0x0
+      st=123456 rb=900 rp=1 tb=900 tp=1 op=0
+  ident=[{type=1, subscriberId=synthetic}] uid=10001 set=DEFAULT tag=0x12
+      st=123456 rb=900 rp=1 tb=900 tp=1 op=0
+UID tag stats:
+  ident=[{type=1, subscriberId=synthetic}] uid=10001 set=DEFAULT tag=0x0
+      st=123456 rb=900 rp=1 tb=900 tp=1 op=0

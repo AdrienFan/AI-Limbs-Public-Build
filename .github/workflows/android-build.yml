@@ -10,6 +10,7 @@ on:
         type: choice
         options:
           - all
+          - privacy-audit
           - extension-hub
           - packager
           - developer-guide
@@ -883,3 +884,50 @@ jobs:
             plugin-lab/runtime/permission-server/build/reports/**
           if-no-files-found: ignore
           retention-days: 14
+
+  privacy_audit:
+    if: inputs.target == 'privacy-audit'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Check evidence rules and bounded shell parsers
+        run: bash tools/plugin_lab/check_privacy_core.sh
+      - name: Validate source contracts
+        run: python3 tools/plugin_lab/validate_privacy_audit.py
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+        with:
+          packages: platform-tools
+      - name: Compile isolated payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platforms;android-36" "build-tools;35.0.0"
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > privacy-audit-build/local.properties
+          chmod +x gradlew
+          ./gradlew -p privacy-audit-build :privacy-audit-plugin:assembleDebug --stacktrace --no-daemon
+      - name: Sign and verify installable plugin
+        env:
+          AILIMBS_PARENT_PLUGIN_PRIVATE_PEM: ${{ secrets.AILIMBS_PARENT_PLUGIN_PRIVATE_PEM }}
+        run: python3 tools/plugin_lab/package_privacy_audit.py
+      - name: Upload plugin and source report
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: privacy-audit-v0.1.0-${{ github.run_number }}
+          path: |
+            dist/AI-Limbs-Privacy-Audit-v0.1.0.ailp
+            dist/AI-Limbs-Privacy-Audit-v0.1.0.ailp.sha256
+            docs/TODO/privacy-audit/*.md
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,29 @@
+{
+  "format": "AIL_PLUGIN_V1",
+  "schema_version": 1,
+  "plugin_id": "plugin.privacy_audit",
+  "version": "0.1.0",
+  "api": {"target": 1, "min": 1},
+  "display": {"name": "隐私安全审计", "description": "本地分析应用权限、系统访问证据与 UID 流量；监测优先级独立于风险，明确盲区并提供用户确认的控制。"},
+  "roles": ["system_plugin"],
+  "activation": {"mode": "hot"},
+  "runtime": {
+    "kind": "android_inprocess",
+    "entry": "payload/plugin.apk",
+    "config": {
+      "entry_class": "com.ai.limbs.plugins.privacyaudit.AuditEntry",
+      "presentation_entry_class": "com.ai.limbs.plugins.privacyaudit.AuditPresentationEntry"
+    }
+  },
+  "dependencies": {"plugins": [], "services": []},
+  "permissions": {"requested_scopes": ["host.process@1", "host.attention@1", "host.notification@1"]},
+  "provides": {
+    "capabilities": ["plugin.privacy_audit.status", "plugin.privacy_audit.scan", "plugin.privacy_audit.inspect", "plugin.privacy_audit.configure", "plugin.privacy_audit.history", "plugin.privacy_audit.verify", "plugin.privacy_audit.control"],
+    "services": [],
+    "providers": ["plugin.privacy_audit.page"],
+    "extensions": [
+      {"point": "ai_limbs.ui.home_tile", "id": "plugin.privacy_audit.tile", "api": 1},
+      {"point": "ai_limbs.ui.screen", "id": "plugin.privacy_audit.screen", "api": 2}
+    ]
+  }
+}
