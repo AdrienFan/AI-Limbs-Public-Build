@@ -74,7 +74,7 @@ internal fun AuthorizationManager(
                                 })
                         }
                         if (state.managementError.isNotBlank()) Text(state.managementError, color = MaterialTheme.colorScheme.error)
-                        Text("支持当前 Android 用户中采用 Shizuku API v13 的 App。先点“连接”，再在目标 App 发起权限申请，回到此处处理。",
+                        Text("支持当前 Android 用户中采用 Shizuku API v13 的 App。点击“连接”会打开目标 App 并建立连接；在目标 App 发起权限申请后，回到此处处理。",
                             style = MaterialTheme.typography.bodySmall)
                         Text("提供当前服务的 ${if (state.uid == 0) "root" else "ADB"} 能力。已有 Shizuku / Sui 连接时，请先停止它再连接本服务。",
                             style = MaterialTheme.typography.bodySmall)
@@ -128,13 +128,14 @@ internal fun AuthorizationManager(
                                 if (app.packages.size > 1) Text("共享 UID：" + app.packages.joinToString("、"), style = MaterialTheme.typography.bodySmall)
                                 Text(when {
                                     app.connected -> "客户端已连接"
+                                    app.delivery == "launching" -> "正在启动目标 App"
                                     app.delivery == "connecting" -> "正在连接客户端"
-                                    app.delivery == "sent" -> "已发送连接信息；请打开目标 App"
+                                    app.delivery == "sent" -> "已发送连接信息；请在目标 App 发起权限申请"
                                     app.delivery == "idle" -> "客户端尚未连接"
                                     else -> app.delivery
                                 }, style = MaterialTheme.typography.bodySmall)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedButton(enabled = state.externalEnabled && !state.busy,
+                                    OutlinedButton(enabled = state.externalEnabled && !state.busy && app.delivery !in setOf("launching", "connecting"),
                                         onClick = { perform { controller.connectExternal(app.packageName) } }) { Text("连接") }
                                     Button(enabled = state.managementAvailable && !state.busy,
                                         onClick = { selected = app }) { Text(if (app.pending > 0) "处理申请" else "管理授权") }

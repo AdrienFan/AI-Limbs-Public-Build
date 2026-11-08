@@ -40,6 +40,7 @@ final class ExternalClients {
     private final Map<String, Pending> pending = new LinkedHashMap<>();
     private final Map<Integer, List<Process>> processes = new HashMap<>();
     private final Set<Integer> delivered = new HashSet<>();
+    private final Set<Integer> connecting = new HashSet<>();
     private final Map<Integer, String> delivery = new ConcurrentHashMap<>();
     private final ExecutorService connector = Executors.newSingleThreadExecutor();
     private volatile boolean enabled;
@@ -197,8 +198,16 @@ final class ExternalClients {
                 if (!compatible(pi)) throw new IllegalArgumentException("No compatible Shizuku Provider");
                 requireApp(pi.applicationInfo.uid);
                 validateAttach(pi.applicationInfo.uid, name);
-                delivery.put(pi.applicationInfo.uid, "connecting");
-                connector.execute(() -> sendBinder(name, pi.applicationInfo.uid));
+                synchronized (lock) {
+                    if (!connecting.add(pi.applicationInfo.uid))
+                        throw new IllegalStateException("该应用正在连接，请等待当前连接完成");
+                }
+                delivery.put(pi.applicationInfo.uid, "launching");
+                try { connector.execute(() -> sendBinder(name, pi.applicationInfo.uid)); }
+                catch (RejectedExecutionException error) {
+                    synchronized (lock) { connecting.remove(pi.applicationInfo.uid); }
+                    throw error;
+                }
                 break;
             case "decide":
                 decide(args.getInt("uid"), args.getString("identity"), args.getString("mode"));
@@ -273,28 +282,38 @@ final class ExternalClients {
     }
 
     private void sendBinder(String name, int uid) {
-        if (!enabled) { delivery.put(uid, "disabled"); return; }
         IContentProvider provider = null;
         String authority = name + ".shizuku";
         long token = Binder.clearCallingIdentity();
         try {
             validateAttach(uid, name);
+            // On the observed Samsung device a non-running client Provider cannot be acquired.
+            // A manual Connect explicitly opens the verified app and waits for activity launch;
+            // provider acquisition is performed once after launch, never by waking all apps.
+            ExternalAppLauncher.launch(name, uid, userId);
+            validateAttach(uid, name);
+            delivery.put(uid, "connecting");
             provider = ActivityManagerApis.getContentProviderExternal(authority, userId, null, authority);
-            if (provider == null) throw new IllegalStateException("Client Provider unavailable");
+            if (provider == null) throw new IllegalStateException("应用已启动，但 Shizuku Provider 仍不可用；请检查该应用的运行限制");
+            if (!provider.asBinder().pingBinder()) throw new IllegalStateException("应用的 Shizuku Provider 已退出，请重新连接");
             Bundle extras = new Bundle();
             extras.putParcelable("moe.shizuku.privileged.api.intent.extra.BINDER", new BinderContainer(server));
             Bundle reply = IContentProviderUtils.callCompat(provider, null, authority, "sendBinder", null, extras);
-            if (reply == null) throw new IllegalStateException("Client Provider rejected the handoff");
+            if (reply == null) throw new IllegalStateException("应用的 Shizuku Provider 未接受连接信息");
             synchronized (lock) { delivered.add(uid); }
             delivery.put(uid, "sent");
         } catch (Exception error) {
-            delivery.put(uid, "连接失败：" + error.getClass().getSimpleName());
+            String detail = error.getMessage();
+            String message = "连接失败：" + error.getClass().getSimpleName()
+                    + (detail == null ? "" : " · " + detail);
+            delivery.put(uid, message.substring(0, Math.min(message.length(), 600)));
             Log.w(TAG, "Client handoff failed: " + name, error);
         } finally {
             if (provider != null) {
                 try { ActivityManagerApis.removeContentProviderExternal(authority, null); }
                 catch (Exception error) { Log.w(TAG, "Client Provider release failed", error); }
             }
+            synchronized (lock) { connecting.remove(uid); }
             Binder.restoreCallingIdentity(token);
         }
     }

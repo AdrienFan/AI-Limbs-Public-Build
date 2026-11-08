@@ -242,7 +242,7 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
             }
         }
         Text(
-            "v0.2.1 · 权限服务基于 Shizuku 开源技术（Apache-2.0）；无障碍功能由 AI Limbs 基座提供。",
+            "v0.2.2 · 权限服务基于 Shizuku 开源技术（Apache-2.0）；无障碍功能由 AI Limbs 基座提供。",
             style = MaterialTheme.typography.bodySmall
         )
     }
