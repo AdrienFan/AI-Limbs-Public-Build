@@ -9,7 +9,7 @@ import java.io.IOException
 import java.util.UUID
 import org.json.JSONObject
 
-/** Private, bounded diagnostic protocol. It never dispatches plugin or shell commands. */
+/** Private, bounded control protocol. Backend RPC only reaches the verified connection; it never dispatches plugin or shell commands. */
 internal object ResidentCoreWire {
     const val VERSION = 1
     const val TIMEOUT_MS = 3_000
@@ -40,27 +40,28 @@ internal object ResidentCoreWire {
         }
     }
 
-    fun request(operation: String, sessionId: String? = null, socketNames: List<String> = listOf(socketName())): JSONObject {
+    fun request(operation: String, sessionId: String? = null, socketNames: List<String> = listOf(socketName()), payload: JSONObject? = null): JSONObject {
         var lastError: IOException? = null
         for (name in socketNames.distinct()) {
-            try { return requestAt(name, operation, sessionId) }
+            try { return requestAt(name, operation, sessionId, payload) }
             catch (error: IOException) { lastError = error }
         }
         throw checkNotNull(lastError) { "No Core socket endpoint was attempted" }
     }
 
-    private fun requestAt(name: String, operation: String, sessionId: String? = null): JSONObject {
+    private fun requestAt(name: String, operation: String, sessionId: String? = null, payload: JSONObject? = null): JSONObject {
         val requestId = UUID.randomUUID().toString()
         LocalSocket().use { socket ->
             socket.connect(LocalSocketAddress(name, LocalSocketAddress.Namespace.ABSTRACT))
-            socket.soTimeout = TIMEOUT_MS
+            socket.soTimeout = if (operation == "permission_backend_rpc") 15_000 else TIMEOUT_MS
             val peer = socket.peerCredentials
             check(peer.uid == Process.myUid()) { "Core peer UID mismatch" }
             write(socket, JSONObject()
                 .put("protocol", VERSION)
                 .put("request_id", requestId)
                 .put("operation", operation)
-                .put("session_id", sessionId ?: JSONObject.NULL))
+                .put("session_id", sessionId ?: JSONObject.NULL)
+                .put("payload", payload ?: JSONObject.NULL))
             val response = read(socket)
             check(response.getInt("protocol") == VERSION) { "Core protocol mismatch" }
             check(response.getString("request_id") == requestId) { "Core request mismatch" }

@@ -151,7 +151,7 @@ object ResidentCoreMain {
                             require(operation == "status" || operation == "stop" ||
                                 operation == "prepare_handoff" || operation == "activate_business" ||
                                 operation == "activate_business_degraded" || operation == "rebind_backend" ||
-                                operation == "stop_permission_backend" ||
+                                operation == "stop_permission_backend" || operation == "permission_backend_rpc" ||
                                 operation == "select_permission_ai_limbs" ||
                                 operation == "select_permission_shizuku" ||
                                 operation == "cancel_business_activation" || operation == "quiesce_business") {
@@ -163,6 +163,7 @@ object ResidentCoreMain {
                                 }
                             }
 
+                            var backendRpcResult: JSONObject? = null
                             when (operation) {
                                 "prepare_handoff" -> backend.prepareHandoffAsync()
                                 "activate_business", "activate_business_degraded" -> {
@@ -227,6 +228,13 @@ object ResidentCoreMain {
                                     }
                                     backend.rebindActiveBusinessAsync()
                                 }
+                                "permission_backend_rpc" -> {
+                                    check(runtime.snapshot().getBoolean("business_attached")) {
+                                        "Backend communication requires active Resident business ownership"
+                                    }
+                                    backendRpcResult = com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime
+                                        .invokeBackendRpcLocally(request.getJSONObject("payload"))
+                                }
                                 "stop_permission_backend" -> {
                                     check(runtime.snapshot().getBoolean("business_attached")) {
                                         "Permission backend stop requires active Resident business ownership"
@@ -268,7 +276,10 @@ object ResidentCoreMain {
                                 .put("request_id", requestId)
                                 .put("session_id", sessionId)
                                 .put("success", true)
-                                .put("result", snapshot().put("stop_requested", operation == "stop"))
+                                .put("result", if (operation == "permission_backend_rpc") JSONObject()
+                                    .put("pid", Process.myPid()).put("uid", Process.myUid())
+                                    .put("backend_rpc_result", checkNotNull(backendRpcResult))
+                                else snapshot().put("stop_requested", operation == "stop"))
                             ResidentCoreWire.write(socket, response)
                             stopping = operation == "stop"
                             userStop = stopping

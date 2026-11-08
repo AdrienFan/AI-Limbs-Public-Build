@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.os.IBinder
+import android.os.Parcel
 import android.os.Process
 import com.ai.assistance.operit.core.tools.system.ShizukuAuthorizer
 import com.ai.assistance.operit.core.tools.system.ShizukuConnectionInfo
@@ -69,6 +70,7 @@ internal object PrivilegeRuntime {
         require(owner == OWNER) { "Only the permission service owner can manage its runtime" }
         return when (operation) {
             "status" -> status(context)
+            "rpc" -> backendRpc(context, args)
             "pair" -> JSONObject().put("allowed", true)
             "prepare" -> {
                 check(!runtimeConnected(context)) { "权限服务已在运行，请先停止再启动" }
@@ -198,6 +200,38 @@ internal object PrivilegeRuntime {
         }
     }
 
+    /** The plugin owns the protocol and payload. Kernel only relays a bounded synchronous call
+     * to the verified backend; it never exposes a raw Binder to plugin code. */
+    private fun backendRpc(context: Context, args: JSONObject): JSONObject = when {
+        connection() != null -> invokeBackendRpcLocally(args)
+        residentBackend(context)?.optBoolean("connected", false) == true ->
+            ResidentCoreController.permissionBackendRpc(context, args)
+        else -> error("Permission backend is not connected")
+    }
+
+    internal fun invokeBackendRpcLocally(args: JSONObject): JSONObject {
+        val descriptor = args.getString("descriptor")
+        val transaction = args.getInt("transaction")
+        val payload = args.getJSONObject("payload").toString()
+        require(descriptor.matches(Regex("[a-zA-Z0-9_.]{1,160}"))) { "Invalid backend descriptor" }
+        require(transaction in 0x100000..0xffffff) { "Backend RPC requires an application-private transaction" }
+        require(payload.length <= 65536) { "Backend request exceeds limit" }
+        val current = checkNotNull(connection()) { "Permission backend is not connected in this runtime" }
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        try {
+            data.writeInterfaceToken(descriptor)
+            data.writeString(payload)
+            check(current.binder.transact(transaction, data, reply, 0)) { "Backend does not implement the requested protocol" }
+            reply.readException()
+            check(reply.dataSize() <= 524288) { "Backend response exceeds limit" }
+            return JSONObject(checkNotNull(reply.readString()) { "Backend returned no response" })
+        } finally {
+            data.recycle()
+            reply.recycle()
+        }
+    }
+
     private fun runtimeConnected(context: Context): Boolean =
         connection() != null || residentBackend(context)?.optBoolean("connected", false) == true
 
@@ -221,5 +255,6 @@ internal object PrivilegeRuntime {
             .put("uid", uid)
             .put("runtime_owner", runtimeOwner)
             .put("api", 1)
+            .put("backend_rpc", true)
     }
 }

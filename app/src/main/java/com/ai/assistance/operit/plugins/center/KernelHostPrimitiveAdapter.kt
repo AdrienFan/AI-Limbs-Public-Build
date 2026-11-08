@@ -985,6 +985,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             "host.privileged.runtime@1/prepare",
             "host.privileged.runtime@1/stop",
             "host.privileged.runtime@1/select",
+            "host.privileged.runtime@1/rpc",
             "host.resident.runtime@1/status",
             "host.resident.runtime@1/set_enabled",
             "host.resident.runtime@1/start",

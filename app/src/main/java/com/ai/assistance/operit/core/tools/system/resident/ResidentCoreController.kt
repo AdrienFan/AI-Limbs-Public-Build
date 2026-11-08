@@ -298,6 +298,15 @@ internal object ResidentCoreController {
         return requestCore(context, "stop_permission_backend", state.getString("session_id"))
     }
 
+    internal fun permissionBackendRpc(context: Context, args: JSONObject): JSONObject {
+        val state = requestCore(context, "status")
+        check(state.optBoolean("available", false) && state.optBoolean("business_attached", false)) {
+            "Resident Core must own business before backend protocol communication"
+        }
+        return ResidentCoreWire.request("permission_backend_rpc", state.getString("session_id"),
+            ResidentCoreEndpoint.candidates(directory(context)), args).getJSONObject("backend_rpc_result")
+    }
+
     internal fun syncPermissionSelection(context: Context, aiLimbsSelected: Boolean): JSONObject? =
         runCatching {
             val state = requestCore(context, "status")
