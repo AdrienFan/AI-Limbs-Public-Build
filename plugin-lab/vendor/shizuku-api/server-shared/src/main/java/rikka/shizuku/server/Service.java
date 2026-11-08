@@ -327,11 +327,15 @@ public abstract class Service<
             throw new IllegalStateException(e.getMessage());
         }
 
+        onRemoteProcessCreated(Binder.getCallingUid(), process);
         ClientRecord clientRecord = clientManager.findClient(Binder.getCallingUid(), Binder.getCallingPid());
         IBinder token = clientRecord != null ? clientRecord.client.asBinder() : null;
 
         return new RemoteProcessHolder(process, token);
     }
+
+    /** Backend extension hook: release app-owned remote processes when its grant is revoked. */
+    protected void onRemoteProcessCreated(int uid, java.lang.Process process) {}
 
     @CallSuper
     @Override

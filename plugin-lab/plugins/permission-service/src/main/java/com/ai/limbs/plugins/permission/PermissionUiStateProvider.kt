@@ -35,6 +35,9 @@ internal class PermissionUiStateProvider(
             "start_root" -> controller.startRoot()
             "stop" -> controller.stop()
             "select" -> controller.select(payload.getString("backend"))
+            "external_enable" -> controller.setExternalEnabled(payload.getBoolean("enabled"))
+            "external_connect" -> controller.connectExternal(payload.getString("package_name"))
+            "external_decide" -> controller.decideExternal(payload.getInt("uid"), payload.getString("identity"), payload.getString("mode"))
             else -> error("Unsupported Permission Service UI event: $eventId")
         }
         return controller.state.value.toUiJson().toString()

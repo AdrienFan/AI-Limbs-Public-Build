@@ -75,6 +75,18 @@ private class PermissionPresentationController(
         perform("select", JSONObject().put("backend", backend))
     }
 
+    override suspend fun setExternalEnabled(enabled: Boolean) {
+        perform("external_enable", JSONObject().put("enabled", enabled))
+    }
+
+    override suspend fun connectExternal(packageName: String) {
+        perform("external_connect", JSONObject().put("package_name", packageName))
+    }
+
+    override suspend fun decideExternal(uid: Int, identity: String, mode: String) {
+        perform("external_decide", JSONObject().put("uid", uid).put("identity", identity).put("mode", mode))
+    }
+
     private companion object {
         const val UI_PROVIDER_ID = "plugin.system.permission_service.ui"
     }

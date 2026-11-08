@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.permission_service",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "AI Limbs 权限服务",
-    "description": "在工具箱中管理 AI Limbs 权限服务，并管理 build67 起内置的 AI Limbs 无障碍服务。"
+    "description": "管理 AI Limbs 权限服务、兼容 Shizuku API v13 的第三方应用授权及内置无障碍服务。"
   },
   "roles": [
     "system_plugin"

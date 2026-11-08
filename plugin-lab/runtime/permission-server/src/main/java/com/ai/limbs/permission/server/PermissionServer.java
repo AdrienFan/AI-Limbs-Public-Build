@@ -25,10 +25,10 @@ import rikka.shizuku.server.*;
 import rikka.shizuku.server.api.IContentProviderUtils;
 
 /**
- * Internal-only adaptation of Shizuku's Service. Host UID is the sole app principal.
- * Plugin-level policy remains in AI Limbs Host; no external app permission database.
+ * Host-owned runtime with a separately authorized Shizuku v13 external client surface.
+ * Manager privileges remain exclusive to the verified Host UID.
  */
-public final class PermissionServer extends Service<UserServiceManager, ClientManager<ConfigManager>, ConfigManager> {
+public final class PermissionServer extends Service<PermissionUserServices, ClientManager<ConfigManager>, ConfigManager> {
     private static final String TAG = "AIL.PermissionServer";
     private static final PrintStream STARTUP_LOG =
             new PrintStream(new FileOutputStream(FileDescriptor.err), true);
@@ -47,6 +47,9 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
             report("Resident ownership ended; stopping permission backend", null);
             System.exit(0);
         });
+    private final ExternalClients external = new ExternalClients(this, hostUid, userId);
+    Handler handler() { return handler; }
+    boolean isAuthorizedClient(int uid) { return uid == hostUid || external.allowed(uid); }
     private boolean acceptedOnce;
     private int missedHandoffs;
 
@@ -94,6 +97,8 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
         System.setProperty("ail.permission.rish.disabled", "true");
         Looper.prepareMainLooper();
         PermissionServer server = new PermissionServer();
+        rikka.shizuku.server.util.HandlerUtil.setMainHandler(server.handler);
+        Runtime.getRuntime().addShutdownHook(new Thread(server.external::shutdown, "ail-client-cleanup"));
         report("Binder service initialized; waiting for Host handoff", null);
         server.scheduleHostHandoff(0L);
         Looper.loop();
@@ -142,22 +147,15 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
         if (!residentOwner.ownsRuntime()) handler.postDelayed(handoffTask, delayMillis);
     }
 
-    @Override public UserServiceManager onCreateUserServiceManager() {
-        return new UserServiceManager() {
-            @Override public String getUserServiceStartCmd(UserServiceRecord record, String key, String token,
-                String packageName, String classname, String suffix, int uid, boolean use32, boolean debug) {
-                throw new UnsupportedOperationException("External UserService is outside internal runtime v1");
-            }
-        };
-    }
+    @Override public PermissionUserServices onCreateUserServiceManager() { return new PermissionUserServices(this); }
     @Override public ConfigManager onCreateConfigManager() {
         return new ConfigManager() {
-            @Override public ConfigPackageEntry find(int uid) { return null; }
+            @Override public ConfigPackageEntry find(int uid) { return external.configEntry(uid); }
             @Override public void update(int uid, List<String> packages, int mask, int values) {
-                throw new UnsupportedOperationException("Host owns plugin authorization");
+                throw new UnsupportedOperationException("Authorization is managed through the plugin protocol");
             }
             @Override public void remove(int uid) {
-                throw new UnsupportedOperationException("Host owns plugin authorization");
+                throw new UnsupportedOperationException("Authorization is managed through the plugin protocol");
             }
         };
     }
@@ -165,44 +163,102 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
         return new ClientManager<>(getConfigManager());
     }
     @Override public boolean checkCallerManagerPermission(String function, int uid, int pid) { return uid == hostUid; }
-    @Override public boolean checkCallerPermission(String function, int uid, int pid, ClientRecord client) { return uid == hostUid; }
+    @Override public boolean checkCallerPermission(String function, int uid, int pid, ClientRecord client) {
+        return uid == hostUid;
+    }
+    @Override protected void onRemoteProcessCreated(int uid, java.lang.Process process) { external.trackProcess(uid, process); }
 
-    @Override public void attachApplication(IShizukuApplication application, Bundle args) {
-        enforceManagerPermission("attachApplication");
-        if (application == null || args == null || !packageName.equals(args.getString("shizuku:attach-package-name")))
-            throw new SecurityException("Invalid Host client");
-        ClientRecord client = getClientManager().addClient(hostUid, Binder.getCallingPid(), application, packageName, 13);
-        if (client == null) throw new IllegalStateException("Host client died");
-        client.allowed = true;
+    @Override public synchronized void attachApplication(IShizukuApplication application, Bundle args) {
+        if (application == null || args == null) throw new IllegalArgumentException("Missing client identity");
+        int uid = Binder.getCallingUid();
+        int pid = Binder.getCallingPid();
+        String name = args.getString("shizuku:attach-package-name");
+        int api = args.getInt("shizuku:attach-api-version", -1);
+        if (uid == hostUid) {
+            if (!packageName.equals(name)) throw new SecurityException("Invalid Host client");
+        } else {
+            if (api != 13) throw new IllegalArgumentException("External clients require Shizuku API v13");
+            external.validateAttach(uid, name);
+        }
+        ClientRecord client = getClientManager().findClient(uid, pid);
+        if (client != null && !client.packageName.equals(name)) throw new SecurityException("Client registration identity changed");
+        if (client == null) client = getClientManager().addClient(uid, pid, application, name, api);
+        if (client == null) throw new IllegalStateException("Client died during registration");
+        client.allowed = uid == hostUid || external.allowed(uid);
+        Bundle reply = new Bundle();
+        reply.putInt("shizuku:attach-reply-version", 13);
+        reply.putInt("shizuku:attach-reply-patch-version", rikka.shizuku.ShizukuApiConstants.SERVER_PATCH_VERSION);
+        reply.putInt("shizuku:attach-reply-uid", Os.getuid());
+        reply.putString("shizuku:attach-reply-secontext", rikka.shizuku.server.util.OsUtils.getSELinuxContext());
+        reply.putBoolean("shizuku:attach-reply-permission-granted", client.allowed);
+        ConfigPackageEntry config = uid == hostUid ? null : getConfigManager().find(uid);
+        reply.putBoolean("shizuku:attach-reply-should-show-request-permission-rationale", config != null && config.isDenied());
+        try { application.bindApplication(reply); }
+        catch (RemoteException error) { throw new IllegalStateException("Client registration callback failed", error); }
     }
     @Override public void showPermissionConfirmation(int code, ClientRecord client, int uid, int pid, int user) {
-        throw new SecurityException("External authorization is not supported");
+        external.request(client, code);
     }
     @Override public void exit() { enforceManagerPermission("exit"); System.exit(0); }
     @Override public void attachUserService(IBinder binder, Bundle args) {
-        enforceManagerPermission("attachUserService");
-        throw new UnsupportedOperationException("External UserService is not supported");
+        if (Binder.getCallingUid() != Os.getuid()) throw new SecurityException("Only a privileged UserService bootstrap may attach");
+        getUserServiceManager().attachUserService(binder, args);
     }
     @Override public void dispatchPackageChanged(Intent intent) { enforceManagerPermission("dispatchPackageChanged"); }
-    @Override public boolean isHidden(int uid) { enforceManagerPermission("isHidden"); return uid != hostUid; }
+    @Override public boolean isHidden(int uid) { enforceManagerPermission("isHidden"); return false; }
     @Override public void dispatchPermissionConfirmationResult(int uid, int pid, int code, Bundle data) {
         enforceManagerPermission("dispatchPermissionConfirmationResult");
-        throw new UnsupportedOperationException("Host owns plugin authorization");
+        throw new UnsupportedOperationException("Use the plugin's authorization protocol");
     }
     @Override public int getFlagsForUid(int uid, int mask) {
         enforceManagerPermission("getFlagsForUid");
-        return (uid == hostUid ? ConfigManager.FLAG_ALLOWED : ConfigManager.FLAG_DENIED) & mask;
+        ConfigPackageEntry value = uid == hostUid ? null : getConfigManager().find(uid);
+        return (uid == hostUid || value != null && value.isAllowed() ? ConfigManager.FLAG_ALLOWED
+            : value != null && value.isDenied() ? ConfigManager.FLAG_DENIED : 0) & mask;
     }
     @Override public void updateFlagsForUid(int uid, int mask, int value) {
         enforceManagerPermission("updateFlagsForUid");
-        throw new UnsupportedOperationException("Host owns plugin authorization");
+        throw new UnsupportedOperationException("Use the plugin's authorization protocol");
     }
     @Override public boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
-        // Do not permit the shared server UID exemption to broaden our exported app interface.
-        if (code != IBinder.INTERFACE_TRANSACTION && Binder.getCallingUid() != hostUid)
-            throw new SecurityException("Only the verified AI Limbs Host UID is accepted");
+        int uid = Binder.getCallingUid();
+        if (code == IBinder.INTERFACE_TRANSACTION) return super.onTransact(code, data, reply, flags);
         if (code >= 30000 && code < 40000) throw new UnsupportedOperationException("Rish is not included");
-        if (code == ResidentOwner.TRANSACTION) return residentOwner.transact(data, reply, flags);
+        if (code == ResidentOwner.TRANSACTION) {
+            if (uid != hostUid) throw new SecurityException("Resident lifetime requires Host UID");
+            return residentOwner.transact(data, reply, flags);
+        }
+        if (code == ExternalClients.TRANSACTION) {
+            if (uid != hostUid) throw new SecurityException("External authorization management requires Host UID");
+            if (reply == null || (flags & IBinder.FLAG_ONEWAY) != 0) throw new IllegalArgumentException("Management calls require a reply");
+            data.enforceInterface(ExternalClients.DESCRIPTOR);
+            String raw = data.readString();
+            if (raw == null || raw.length() > 65536 || data.dataAvail() != 0) throw new IllegalArgumentException("Invalid management payload");
+            try {
+                String result = external.rpc(new org.json.JSONObject(raw)).toString();
+                if (result.length() > 200000) throw new IllegalStateException("Too many compatible apps for one response");
+                reply.writeNoException(); reply.writeString(result); return true;
+            } catch (RuntimeException error) { throw error; }
+            catch (Exception error) { throw new IllegalStateException("External authorization operation failed", error); }
+        }
+        if (code == PermissionUserServices.BOOTSTRAP_TRANSACTION) {
+            if (uid != Os.getuid() || reply == null || (flags & IBinder.FLAG_ONEWAY) != 0)
+                throw new SecurityException("UserService bootstrap requires a synchronous privileged caller");
+            data.enforceInterface(PermissionUserServices.BOOTSTRAP_DESCRIPTOR);
+            String launch = data.readString();
+            IBinder lifetime = data.readStrongBinder();
+            if (launch == null || launch.length() > 128 || data.dataAvail() != 0) throw new IllegalArgumentException("Invalid launch claim");
+            getUserServiceManager().claim(launch, lifetime);
+            reply.writeNoException(); return true;
+        }
+        // Bootstrap children have server UID, but still need the unguessable, live UserService token.
+        if (code == 102 && uid == Os.getuid()) return super.onTransact(code, data, reply, flags);
+        if (uid != hostUid) {
+            if (code >= 101) throw new SecurityException("Manager-only transaction");
+            if (code == 18) return super.onTransact(code, data, reply, flags);
+            if (code == 14) throw new UnsupportedOperationException("Legacy external attach protocol is not supported");
+            external.enforceClient(uid, Binder.getCallingPid(), code != 15 && code != 16 && code != 17);
+        }
         return super.onTransact(code, data, reply, flags);
     }
 }

@@ -120,7 +120,10 @@ public abstract class UserServiceRecord {
 
     public void destroy() {
         if (service != null) {
-            service.unlinkToDeath(deathRecipient, 0);
+            try { service.unlinkToDeath(deathRecipient, 0); }
+            catch (java.util.NoSuchElementException error) {
+                LOGGER.w(error, "UserService death registration was already removed");
+            }
         }
 
         if (service != null && service.pingBinder()) {

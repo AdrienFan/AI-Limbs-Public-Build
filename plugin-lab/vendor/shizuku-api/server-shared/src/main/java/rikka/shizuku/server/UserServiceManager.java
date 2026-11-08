@@ -94,6 +94,7 @@ public abstract class UserServiceManager {
     private void removeUserServiceLocked(UserServiceRecord record) {
         if (userServiceRecords.values().remove(record)) {
             record.destroy();
+            for (List<UserServiceRecord> records : packageUserServiceRecords.values()) records.remove(record);
             onUserServiceRecordRemoved(record);
         }
     }
@@ -217,21 +218,20 @@ public abstract class UserServiceManager {
 
         LOGGER.v("Starting process for service record %s (%s)...", key, token);
 
-        String cmd = getUserServiceStartCmd(record, key, token, packageName, classname, processNameSuffix, callingUid, use32Bits && AbiUtil.has32Bit(), debug);
-        int exitCode;
         try {
+            String cmd = getUserServiceStartCmd(record, key, token, packageName, classname, processNameSuffix, callingUid, use32Bits && AbiUtil.has32Bit(), debug);
             java.lang.Process process = Runtime.getRuntime().exec("sh");
-            OutputStream os = process.getOutputStream();
-            os.write(cmd.getBytes());
-            os.flush();
-            os.close();
-
-            exitCode = process.waitFor();
-        } catch (Throwable e) {
-            throw new IllegalStateException(e.getMessage());
-        }
-        if (exitCode != 0) {
-            throw new IllegalStateException("sh exited with " + exitCode);
+            try (OutputStream output = process.getOutputStream()) {
+                output.write(cmd.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                output.flush();
+            }
+            int exitCode = process.waitFor();
+            if (exitCode != 0) throw new IllegalStateException("sh exited with " + exitCode);
+        } catch (Exception error) {
+            // A revoked queued launch or one bad client must not reach the daemon's
+            // uncaught-exception handler and terminate every other client's backend.
+            LOGGER.w(error, "UserService startup failed for %s", packageName);
+            record.removeSelf();
         }
     }
 
@@ -278,7 +278,7 @@ public abstract class UserServiceManager {
     public void removeUserServicesForPackage(String packageName) {
         List<UserServiceRecord> list = packageUserServiceRecords.get(packageName);
         if (list != null) {
-            for (UserServiceRecord record : list) {
+            for (UserServiceRecord record : new ArrayList<>(list)) {
                 record.removeSelf();
                 LOGGER.i("Remove user service %s for package %s", record.token, packageName);
             }

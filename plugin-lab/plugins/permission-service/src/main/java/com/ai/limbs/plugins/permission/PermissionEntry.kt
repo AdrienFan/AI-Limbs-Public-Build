@@ -3,6 +3,11 @@ package com.ai.limbs.plugins.permission
 import com.ai.limbs.plugin.runtime.*
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 
 class PermissionEntry : InProcessPluginEntry {
     override suspend fun mount(host: InProcessPluginHost): InProcessPluginHandle {
@@ -17,7 +22,7 @@ class PermissionEntry : InProcessPluginEntry {
             mapOf("kind" to "plugin_page", "screen_id" to "$ID.screen"))
         host.registerScreen(InProcessScreen(
             id = "$ID.screen", title = "AI Limbs 权限服务",
-            description = "配对、启动和管理 Android 权限服务与 AI Limbs 内置无障碍服务",
+            description = "管理权限服务、第三方 App 授权与 AI Limbs 内置无障碍服务",
             schemaId = "ai_limbs.plugin_center.ui.v1",
             documentJson = JSONObject().put("schema", 1).put("layout", "edge_to_edge")
                 .put("blocks", JSONArray().put(JSONObject().put("type", "plugin_page")
@@ -30,7 +35,7 @@ class PermissionEntry : InProcessPluginEntry {
         ))
         host.registerCapability(InProcessCapabilitySpec(
             id = "plugin.permission_service.status", displayName = "AI Limbs 权限服务状态",
-            description = "读取内置权限服务连接状态及当前执行后端",
+            description = "读取权限服务连接状态、当前执行后端及第三方授权摘要",
             keywords = listOf("权限服务", "Shizuku", "ADB", "permission"),
             effect = InProcessCapabilityEffect.READ_ONLY,
             domain = InProcessCapabilityDomain.PLUGIN,
@@ -59,7 +64,20 @@ class PermissionEntry : InProcessPluginEntry {
             }
         ))
         host.logger.i("PermissionService", "Permission service plugin mounted")
-        return InProcessPluginHandle { controller.close() }
+        val polling = host.scope.launch(Dispatchers.IO) {
+            var lastError: String? = null
+            while (isActive) {
+                try { controller.initialize(); lastError = null }
+                catch (error: CancellationException) { throw error }
+                catch (error: Exception) {
+                    controller.reportStatusFailure(error)
+                    if (lastError != error.message) host.logger.e("PermissionService", "Status poll failed: " + error.message)
+                    lastError = error.message
+                }
+                delay(3000)
+            }
+        }
+        return InProcessPluginHandle { polling.cancel(); controller.close() }
     }
     private companion object { const val ID = "plugin.system.permission_service" }
 }

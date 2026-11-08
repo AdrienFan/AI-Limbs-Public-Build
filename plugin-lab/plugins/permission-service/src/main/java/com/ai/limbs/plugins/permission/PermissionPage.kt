@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ViewCompositionStrategy
@@ -81,6 +82,7 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
     var pairCode by remember { mutableStateOf("") }
     var connectPort by remember { mutableStateOf("") }
     var stopConfirm by remember { mutableStateOf(false) }
+    var authorizationOpen by remember { mutableStateOf(false) }
     var accessibilityStatus by remember { mutableStateOf(BuiltInAccessibilityStatus()) }
 
     fun perform(block: suspend () -> Unit) {
@@ -111,20 +113,6 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
         }
     }
 
-    LaunchedEffect(controller) {
-        while (true) {
-            if (!controller.state.value.busy) {
-                try { controller.refresh() }
-                catch (error: CancellationException) { throw error }
-                catch (error: Exception) {
-                    host.logger.w("PermissionService", "Status unavailable: " + error.message)
-                    Toast.makeText(context, "请先安装支持权限服务的基座，并在插件中心授权", Toast.LENGTH_LONG).show()
-                    break
-                }
-            }
-            delay(3000)
-        }
-    }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -133,19 +121,22 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
             Text("AI Limbs 权限服务", style = MaterialTheme.typography.headlineSmall)
         }
         Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (state.running) "服务已连接" else "服务未运行", style = MaterialTheme.typography.titleLarge)
-                Text(state.message)
-                if (state.running) Text(if (state.uid == 0) "运行权限：root" else "运行权限：ADB")
-                Text("当前执行后端：" + when (state.backend) {
-                    "ai_limbs" -> "AI Limbs 权限服务"
-                    "shizuku" -> "外部 Shizuku / Sui"
-                    else -> "尚未读取"
-                })
-                if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(enabled = !state.busy, onClick = { perform { controller.refresh() } }) { Text("刷新") }
-                    Button(enabled = !state.busy && state.running, onClick = { stopConfirm = true }) { Text("停止服务") }
+            BoxWithConstraints(Modifier.fillMaxWidth().padding(16.dp)) {
+                if (maxWidth >= 440.dp) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            ConnectionDetails(state, { perform { controller.refresh() } }, { stopConfirm = true })
+                        }
+                        AuthorizationShortcut(state) { authorizationOpen = true }
+                    }
+                } else {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ConnectionDetails(state, { perform { controller.refresh() } }, { stopConfirm = true })
+                        HorizontalDivider()
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                            AuthorizationShortcut(state) { authorizationOpen = true }
+                        }
+                    }
                 }
             }
         }
@@ -199,7 +190,7 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
                         Text("切换到外部 Shizuku / Sui")
                     }
                 }
-                Text("服务仅供 AI Limbs 使用。设备重启后需重新启动；各插件仍按 AI Limbs 授权执行。", style = MaterialTheme.typography.bodySmall)
+                Text("可在连接状态右侧管理第三方 App 授权。设备重启后需重新启动服务；AI Limbs 插件仍按各自授权执行。", style = MaterialTheme.typography.bodySmall)
             }
         }
         Card(Modifier.fillMaxWidth()) {
@@ -251,10 +242,11 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
             }
         }
         Text(
-            "v0.1.6 · 权限服务基于 Shizuku 开源技术（Apache-2.0）；无障碍功能由 AI Limbs 基座提供。",
+            "v0.2.0 · 权限服务基于 Shizuku 开源技术（Apache-2.0）；无障碍功能由 AI Limbs 基座提供。",
             style = MaterialTheme.typography.bodySmall
         )
     }
+    if (authorizationOpen) AuthorizationManager(host, controller, state) { authorizationOpen = false }
     if (stopConfirm) AlertDialog(
         onDismissRequest = { stopConfirm = false },
         title = { Text("停止权限服务？") },
@@ -262,4 +254,23 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
         confirmButton = { TextButton(onClick = { stopConfirm = false; perform { controller.stop() } }) { Text("停止") } },
         dismissButton = { TextButton(onClick = { stopConfirm = false }) { Text("取消") } }
     )
+}
+
+@Composable
+private fun ConnectionDetails(state: PermissionState, refresh: () -> Unit, stop: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(if (state.statusError.isNotBlank()) "连接状态待确认" else if (state.running) "服务已连接" else "服务未运行", style = MaterialTheme.typography.titleLarge)
+        Text(state.message)
+        if (state.running) Text(if (state.uid == 0) "运行权限：root" else "运行权限：ADB")
+        Text("当前执行后端：" + when (state.backend) {
+            "ai_limbs" -> "AI Limbs 权限服务"
+            "shizuku" -> "外部 Shizuku / Sui"
+            else -> "尚未读取"
+        })
+        if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(enabled = !state.busy, onClick = refresh) { Text("刷新") }
+            Button(enabled = !state.busy && state.running, onClick = stop) { Text("停止服务") }
+        }
+    }
 }

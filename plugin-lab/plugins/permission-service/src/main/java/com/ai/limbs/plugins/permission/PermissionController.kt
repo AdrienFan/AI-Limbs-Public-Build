@@ -14,6 +14,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import android.util.AtomicFile
+import org.json.JSONArray
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
@@ -26,8 +29,16 @@ internal data class PermissionState(
     val backend: String = "",
     val uid: Int = -1,
     val busy: Boolean = false,
-    val message: String = "正在读取状态"
+    val message: String = "正在读取状态",
+    val statusError: String = "",
+    val managementAvailable: Boolean = false,
+    val managementError: String = "",
+    val externalEnabled: Boolean = false,
+    val pendingCount: Int = 0,
+    val apps: List<ExternalApp> = emptyList()
 )
+
+private class AuthorizationPersistenceException(message: String, cause: Throwable) : IllegalStateException(message, cause)
 
 internal class PermissionController(private val host: InProcessPluginHost) : PermissionPageController {
     private val gate = Mutex()
@@ -49,14 +60,112 @@ internal class PermissionController(private val host: InProcessPluginHost) : Per
         return result
     }
 
-    override suspend fun refresh(): JSONObject {
+    private val authorizationFile by lazy { AtomicFile(File(host.dataDir, "external_authorizations_v1.json")) }
+
+    private suspend fun externalRpc(payload: JSONObject): JSONObject = invoke("rpc", JSONObject()
+        .put("descriptor", "ai_limbs.permission.clients.v1").put("transaction", 0x414950)
+        .put("payload", payload))
+
+    override suspend fun refresh(): JSONObject = gate.withLock {
+        withContext(Dispatchers.IO) { refreshStatus() }
+    }
+
+    fun reportStatusFailure(error: Exception) {
+        val detail = error.message ?: error.javaClass.simpleName
+        mutableState.value = mutableState.value.copy(statusError = detail, message = "连接状态读取失败，请查看日志中心",
+            managementAvailable = false, managementError = "连接状态暂不可确认")
+    }
+
+    suspend fun initialize(): JSONObject = gate.withLock {
+        withContext(Dispatchers.IO) { refreshStatus(initializeExternal = true) }
+    }
+
+    private suspend fun refreshStatus(initializeExternal: Boolean = false): JSONObject {
         val result = invoke("status")
         mutableState.value = mutableState.value.copy(
             running = result.getBoolean("running"), backend = result.getString("backend"),
-            uid = result.getInt("uid"),
+            uid = result.getInt("uid"), statusError = "",
             message = if (result.getBoolean("running")) "权限服务已连接" else "权限服务未运行"
         )
-        return result
+        if (!result.getBoolean("running")) {
+            mutableState.value = mutableState.value.copy(managementAvailable = false,
+                managementError = "请先启动权限服务", externalEnabled = false, pendingCount = 0, apps = emptyList())
+        } else if (!result.optBoolean("backend_rpc", false)) {
+            mutableState.value = mutableState.value.copy(managementAvailable = false,
+                managementError = "第三方授权管理需要支持服务端通信接口的新版基座")
+        } else {
+            try {
+                var snapshot = externalRpc(JSONObject().put("operation", "snapshot"))
+                require(snapshot.getInt("protocol") == 1) { "第三方授权协议版本不匹配" }
+                if (initializeExternal && !snapshot.getBoolean("initialized")) {
+                    val config = if (authorizationFile.baseFile.exists() || File(authorizationFile.baseFile.path + ".bak").exists()) {
+                        JSONObject(String(authorizationFile.readFully(), Charsets.UTF_8))
+                    } else {
+                        JSONObject().put("schema", 1).put("enabled", false).put("decisions", JSONArray())
+                    }
+                    snapshot = externalRpc(JSONObject().put("operation", "restore").put("config", config))
+                }
+                if (snapshot.getBoolean("initialized")) applyExternalSnapshot(snapshot)
+            } catch (error: CancellationException) { throw error }
+            catch (error: AuthorizationPersistenceException) {
+                host.logger.e("PermissionService", error.message ?: "Authorization persistence failed")
+                mutableState.value = mutableState.value.copy(managementError = error.message ?: "授权记录保存失败")
+            }
+            catch (error: Exception) {
+                val message = "第三方授权暂不可用：" + (error.message ?: error.javaClass.simpleName)
+                if (mutableState.value.managementError != message) host.logger.e("PermissionService", message)
+                mutableState.value = mutableState.value.copy(managementAvailable = false,
+                    managementError = message)
+            }
+        }
+        return result.put("third_party", JSONObject()
+            .put("available", state.value.managementAvailable).put("enabled", state.value.externalEnabled)
+            .put("authorized", state.value.apps.count { it.decision == "allow" || it.decision == "session" })
+            .put("pending", state.value.pendingCount).put("error", state.value.managementError))
+    }
+
+    private fun applyExternalSnapshot(snapshot: JSONObject) {
+        val rows = snapshot.getJSONArray("apps")
+        val apps = List(rows.length()) { ExternalApp.fromJson(rows.getJSONObject(it)) }
+        mutableState.value = mutableState.value.copy(managementAvailable = true, managementError = "",
+            externalEnabled = snapshot.getBoolean("enabled"), pendingCount = snapshot.getInt("pending"), apps = apps)
+        try {
+            persistAuthorizations(snapshot.getJSONObject("config"))
+        } catch (error: Exception) {
+            throw AuthorizationPersistenceException("授权变更已在当前服务生效，但保存授权记录失败", error)
+        }
+    }
+
+    private fun persistAuthorizations(config: JSONObject) {
+        val bytes = config.toString().toByteArray(Charsets.UTF_8)
+        if (authorizationFile.baseFile.exists() && authorizationFile.readFully().contentEquals(bytes)) return
+        val output = authorizationFile.startWrite()
+        try {
+            output.write(bytes)
+            authorizationFile.finishWrite(output)
+        } catch (error: Exception) {
+            authorizationFile.failWrite(output)
+            throw error
+        }
+    }
+
+    override suspend fun setExternalEnabled(enabled: Boolean) = action("更新第三方接入") {
+        check(state.value.managementAvailable) { state.value.managementError }
+        applyExternalSnapshot(externalRpc(JSONObject().put("operation", "enable").put("enabled", enabled)))
+        log(if (enabled) "第三方 App 接入已启用" else "第三方 App 接入已关闭")
+    }
+
+    override suspend fun connectExternal(packageName: String) = action("连接第三方 App") {
+        check(state.value.managementAvailable) { state.value.managementError }
+        applyExternalSnapshot(externalRpc(JSONObject().put("operation", "connect").put("package_name", packageName)))
+    }
+
+    override suspend fun decideExternal(uid: Int, identity: String, mode: String) = action("更新应用授权") {
+        check(state.value.managementAvailable) { state.value.managementError }
+        require(mode in setOf("allow", "session", "deny", "revoke")) { "未知授权决定" }
+        applyExternalSnapshot(externalRpc(JSONObject().put("operation", "decide").put("uid", uid)
+            .put("identity", identity).put("mode", mode)))
+        log("应用授权已更新：uid=$uid，决定=$mode")
     }
 
     private fun log(message: String) {
@@ -65,8 +174,7 @@ internal class PermissionController(private val host: InProcessPluginHost) : Per
     }
 
     private suspend fun action(title: String, block: suspend () -> Unit) {
-        check(gate.tryLock()) { "另一个权限服务操作正在进行" }
-        try { runAction(title, block) } finally { gate.unlock() }
+        gate.withLock { runAction(title, block) }
     }
 
     private suspend fun runAction(title: String, block: suspend () -> Unit) {
@@ -176,7 +284,7 @@ internal class PermissionController(private val host: InProcessPluginHost) : Per
                 check(activated) { "服务端未连接到基座，请查看日志中心" }
             }
             invoke("select", JSONObject().put("backend", "ai_limbs"))
-            refresh()
+            refreshStatus(initializeExternal = true)
             log("权限服务启动成功，已选择 AI Limbs 后端")
         } finally {
             if (!activated) withContext(NonCancellable) { invoke("stop") }
@@ -198,7 +306,7 @@ internal class PermissionController(private val host: InProcessPluginHost) : Per
             recordDiagnostic(readLogTail(serverLog), permit)
             check(activated) { "root 服务端未连接" }
             invoke("select", JSONObject().put("backend", "ai_limbs"))
-            refresh()
+            refreshStatus(initializeExternal = true)
             log("root 权限服务启动成功")
         } finally { if (!activated) withContext(NonCancellable) { invoke("stop") } }
     }
@@ -222,13 +330,13 @@ internal class PermissionController(private val host: InProcessPluginHost) : Per
 
     override suspend fun stop() = action("停止权限服务") {
         invoke("stop")
-        refresh()
+        refreshStatus(initializeExternal = true)
         log("权限服务已停止")
     }
 
     override suspend fun select(backend: String) = action("选择执行后端") {
         invoke("select", JSONObject().put("backend", backend))
-        refresh()
+        refreshStatus(initializeExternal = true)
         log(if (backend == "ai_limbs") "已选择 AI Limbs 权限服务" else "已选择外部 Shizuku / Sui")
     }
 
