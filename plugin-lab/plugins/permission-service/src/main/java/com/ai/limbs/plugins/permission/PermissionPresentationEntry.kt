@@ -3,21 +3,17 @@ package com.ai.limbs.plugins.permission
 import com.ai.limbs.plugin.runtime.InProcessPluginPresentationEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginPresentationHandle
 import com.ai.limbs.plugin.runtime.InProcessPluginPresentationHost
-import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
-import org.json.JSONObject
 
 class PermissionPresentationEntry : InProcessPluginPresentationEntry {
     override suspend fun mount(
         host: InProcessPluginPresentationHost
     ): InProcessPluginPresentationHandle {
-        require(host.pluginId == ID) {
-            "Unexpected permission service presentation owner"
+        require(host.pluginId == ID) { "Unexpected permission service presentation owner" }
+        // A hot upgrade can publish the presentation descriptor before the UI-state binding
+        // appears in a Host snapshot. Register the page independently and observe that binding.
+        val controller = PermissionPresentationController(host.providers, host.scope) { error ->
+            host.logger.e("PermissionService", "Presentation state channel failed: " + error.message)
         }
-        val controller = PermissionPresentationController(host)
         val registration = host.registerPageProvider(
             "$ID.page",
             PermissionPage(host, controller),
@@ -26,68 +22,5 @@ class PermissionPresentationEntry : InProcessPluginPresentationEntry {
         return InProcessPluginPresentationHandle { registration.close() }
     }
 
-    private companion object {
-        const val ID = "plugin.system.permission_service"
-    }
-}
-
-private class PermissionPresentationController(
-    private val host: InProcessPluginPresentationHost
-) : PermissionPageController {
-    private val provider: InProcessUiStateProvider =
-        requireNotNull(host.providers.resolve(UI_PROVIDER_ID)?.payload as? InProcessUiStateProvider) {
-            "Permission Service Core UI provider is unavailable"
-        }
-
-    override val state: StateFlow<PermissionState> =
-        provider.stateJson
-            .map(::permissionStateFromUiJson)
-            .stateIn(
-                host.scope,
-                SharingStarted.Eagerly,
-                permissionStateFromUiJson(provider.stateJson.value)
-            )
-
-    private suspend fun perform(
-        event: String,
-        payload: JSONObject = JSONObject()
-    ): JSONObject = JSONObject(provider.perform(event, payload.toString()))
-
-    override suspend fun refresh(): JSONObject = perform("refresh")
-
-    override suspend fun pair(port: Int, code: String) {
-        perform("pair", JSONObject().put("port", port).put("code", code))
-    }
-
-    override suspend fun startAdb(port: Int) {
-        perform("start_adb", JSONObject().put("port", port))
-    }
-
-    override suspend fun startRoot() {
-        perform("start_root")
-    }
-
-    override suspend fun stop() {
-        perform("stop")
-    }
-
-    override suspend fun select(backend: String) {
-        perform("select", JSONObject().put("backend", backend))
-    }
-
-    override suspend fun setExternalEnabled(enabled: Boolean) {
-        perform("external_enable", JSONObject().put("enabled", enabled))
-    }
-
-    override suspend fun connectExternal(packageName: String) {
-        perform("external_connect", JSONObject().put("package_name", packageName))
-    }
-
-    override suspend fun decideExternal(uid: Int, identity: String, mode: String) {
-        perform("external_decide", JSONObject().put("uid", uid).put("identity", identity).put("mode", mode))
-    }
-
-    private companion object {
-        const val UI_PROVIDER_ID = "plugin.system.permission_service.ui"
-    }
+    private companion object { const val ID = "plugin.system.permission_service" }
 }

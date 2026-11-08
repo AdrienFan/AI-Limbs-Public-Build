@@ -112,8 +112,14 @@ internal class PermissionController(private val host: InProcessPluginHost) : Per
                 mutableState.value = mutableState.value.copy(managementError = error.message ?: "授权记录保存失败")
             }
             catch (error: Exception) {
-                val message = "第三方授权暂不可用：" + (error.message ?: error.javaClass.simpleName)
-                if (mutableState.value.managementError != message) host.logger.e("PermissionService", message)
+                val detail = error.message ?: error.javaClass.simpleName
+                val message = if (detail.contains("Binder invocation to an incorrect interface") ||
+                    detail.contains("Backend does not implement the requested protocol")) {
+                    "当前运行的服务端不支持新版接口。请先停止权限服务，再使用连接端口重新启动。"
+                } else {
+                    "第三方授权暂不可用：$detail"
+                }
+                if (mutableState.value.managementError != message) host.logger.e("PermissionService", "第三方授权协议不可用：$detail")
                 mutableState.value = mutableState.value.copy(managementAvailable = false,
                     managementError = message)
             }

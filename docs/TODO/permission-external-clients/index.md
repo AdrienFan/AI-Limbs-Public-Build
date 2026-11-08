@@ -20,3 +20,13 @@ status: implementation-complete-validation-pending
 - [ ] Host / Resident 真机安装、客户端授权、UserService 和撤销验证
 
 [使用及协议说明](../../../plugin-lab/plugins/permission-service/README.md)
+
+
+## v0.2.1 页面状态源发布顺序修复
+
+- [x] 根据真机异常栈定位展示入口的过早 Provider 解析
+- [x] 页面挂载与状态源绑定分离，观察状态源发布/替换/撤销
+- [x] 为旧服务端协议提供明确的重启操作提示
+- [x] 增加状态源晚发布、替换移除及错误 owner 三个回归用例
+- [x] 云构建任务增加对应 JVM 单元测试
+- [ ] 云编译与安装后的页面恢复验证

@@ -5,11 +5,11 @@ android {
     namespace = "com.ai.limbs.permission.server"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.ai.limbs.permission.server.v020"
+        applicationId = "com.ai.limbs.permission.server.v021"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.2.0"
+        versionCode = 6
+        versionName = "0.2.1"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21

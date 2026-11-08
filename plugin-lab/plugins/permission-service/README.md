@@ -1,11 +1,11 @@
-# AI Limbs 权限服务 v0.2.0
+# AI Limbs 权限服务 v0.2.1
 
 管理 AI Limbs 自身的 ADB/root 权限服务，并为当前 Android 用户中的兼容 App 提供 Shizuku API v13 接入、逐 UID 授权及 UserService。原有无线配对、root 启动、后端选择和内置无障碍入口继续保留。
 
 ## 运行要求
 
 - 原有功能沿用 `host.privileged.runtime@1`；插件中心需要批准该 scope。
-- **第三方接入需要同时更新支持 `rpc` 的基座与 v0.2.0 插件，并重新启动权限服务。** 本次基座源码版本标记为 build122；尚未编译和安装验证。
+- **第三方接入需要同时更新支持 `rpc` 的基座与 v0.2.1 插件，并重新启动权限服务。** 本次基座源码版本标记为 build122；尚未编译和安装验证。
 - 旧基座返回的状态没有 `backend_rpc=true` 时，页面明确显示需要新版基座，第三方授权管理不可用。
 - 普通 App 必须集成 Shizuku API v13，并发布受 `INTERACT_ACROSS_USERS_FULL` 保护的 `${applicationId}.shizuku` Provider；仅给任意普通 App 设置权限不能替代客户端适配。
 - 此版本不实现 API v12 旧附着协议、Rish、官方管理器包身份/自定义接口、跨 Android 用户或工作资料空间，以及 UserService 的 JDWP 调试启动选项。依赖这些功能的 App 不能据此认定兼容。
@@ -53,6 +53,17 @@
 
 ## 构建和交付
 
-独立云任务仍为 `android-build.yml` 的 `target=permission-service`。任务产物标记已更新为 v0.2.0。插件 payload applicationId 为 `com.ai.limbs.payload.permission.v020`，服务 APK 为 `com.ai.limbs.permission.server.v020`；既有可信签名与摘要打包流程不变。
+独立云任务仍为 `android-build.yml` 的 `target=permission-service`。任务产物标记已更新为 v0.2.1。插件 payload applicationId 为 `com.ai.limbs.payload.permission.v021`，服务 APK 为 `com.ai.limbs.permission.server.v021`；既有可信签名与摘要打包流程不变。
 
 本次完成源码迭代和差异检查，未执行 Gradle 构建、测试、安装或真机功能验证。下一轮需要重点验证：Host/Resident 的 RPC 路由、兼容 App 的授权回调、UserService 认领/返回、撤销清理、重启后身份恢复、官方 Shizuku 存在时的明确提示，以及宽窄屏布局。
+
+
+## v0.2.1 页面挂载修复
+
+日志确认：插件业务入口已经挂载，但 Resident 展示入口在创建 controller 时立即解析 UI-state Provider，缺少该 binding 就抛出异常，因而页面 Provider 不会注册。此后相同展示版本的失败缓存使页面持续不可用。
+
+展示 controller 现在订阅统一 ProviderDirectory 的 observe 接口。页面注册不再依赖状态 Provider 已经存在；未发布时呈现同步状态并禁止操作，发布/替换时订阅当前状态，每个动作重新解析并核对当前 owner/id/type，避免沿用升级前的对象。这里没有新增 Host/Resident 分支、替代后端或绕过授权的路径。
+
+增加三个回归用例：先创建页面状态控制器后发布 Provider；替换/移除 Provider 后的状态和动作路由；拒绝错误 owner。权限插件的云构建任务先运行这些 JVM 单元测试，再生成安装包。
+
+若热升级后独立权限服务仍运行旧版协议，管理页明确提示先停止再按连接端口启动，不会把协议错误当作新接口可用。已安装 build122 基座可以继续使用，本次仅需更新权限插件并重新启动权限服务。修复的实际安装和页面恢复仍需真机确认。

@@ -9,11 +9,11 @@ android {
     compileSdk = 36
     ndkVersion = "27.0.12077973"
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.permission.v020"
+        applicationId = "com.ai.limbs.payload.permission.v021"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.2.0"
+        versionCode = 9
+        versionName = "0.2.1"
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild { cmake { arguments += "-DANDROID_STL=none" } }
     }
@@ -38,6 +38,9 @@ tasks.named("preBuild") { dependsOn(prepareServer) }
 
 dependencies {
     compileOnly(project(":plugin-inprocess-api"))
+    testImplementation(project(":plugin-inprocess-api"))
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
