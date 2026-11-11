@@ -162,6 +162,11 @@ interface InProcessPageProvider {
     fun createView(context: Context, sharedUi: InProcessSharedUiHost): View
 }
 
+/** A Host-owned floating window can ask its presentation to open on an existing surface. */
+interface InProcessOverlayPageProvider : InProcessPageProvider {
+    fun open()
+}
+
 /** Optional host-owned components that a plugin page may embed without giving up page ownership. */
 interface InProcessSharedUiHost {
     fun supports(componentId: String): Boolean

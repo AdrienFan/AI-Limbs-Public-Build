@@ -18,7 +18,9 @@ class PermissionEntry : InProcessPluginEntry {
             PermissionUiStateProvider(controller, host.scope),
             mapOf("kind" to "ui_state")
         )
-        host.registerProvider("$ID.page", PermissionPage(host, controller),
+        val pairing = PermissionPairingOverlay(host, controller)
+        host.registerProvider(PAIRING_OVERLAY_PROVIDER, pairing, pairingOverlayMetadata)
+        host.registerProvider("$ID.page", PermissionPage(host, controller, pairing),
             mapOf("kind" to "plugin_page", "screen_id" to "$ID.screen"))
         host.registerScreen(InProcessScreen(
             id = "$ID.screen", title = "AI Limbs 权限服务",
@@ -77,7 +79,12 @@ class PermissionEntry : InProcessPluginEntry {
                 delay(3000)
             }
         }
-        return InProcessPluginHandle { polling.cancel(); controller.close() }
+        return InProcessPluginHandle {
+            polling.cancel()
+            try { pairing.close() }
+            catch (error: Exception) { host.logger.w("PermissionService", "Pairing overlay cleanup failed", error) }
+            finally { controller.close() }
+        }
     }
     private companion object { const val ID = "plugin.system.permission_service" }
 }

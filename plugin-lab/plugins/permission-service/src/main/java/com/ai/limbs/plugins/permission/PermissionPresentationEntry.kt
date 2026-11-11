@@ -14,12 +14,20 @@ class PermissionPresentationEntry : InProcessPluginPresentationEntry {
         val controller = PermissionPresentationController(host.providers, host.scope) { error ->
             host.logger.e("PermissionService", "Presentation state channel failed: " + error.message)
         }
+        val pairing = PermissionPairingOverlay(host, controller)
+        val overlayRegistration = host.registerPageProvider(PAIRING_OVERLAY_PROVIDER, pairing, pairingOverlayMetadata)
         val registration = host.registerPageProvider(
             "$ID.page",
-            PermissionPage(host, controller),
+            PermissionPage(host, controller, pairing),
             mapOf("kind" to "plugin_page", "screen_id" to "$ID.screen")
         )
-        return InProcessPluginPresentationHandle { registration.close() }
+        return InProcessPluginPresentationHandle {
+            try { pairing.close() }
+            finally {
+                registration.close()
+                overlayRegistration.close()
+            }
+        }
     }
 
     private companion object { const val ID = "plugin.system.permission_service" }

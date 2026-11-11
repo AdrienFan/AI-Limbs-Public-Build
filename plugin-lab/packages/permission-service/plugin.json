@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.permission_service",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "api": {
     "target": 1,
     "min": 1
@@ -31,7 +31,8 @@
   },
   "permissions": {
     "requested_scopes": [
-      "host.privileged.runtime@1"
+      "host.privileged.runtime@1",
+      "host.window.overlay@1"
     ]
   },
   "provides": {
@@ -43,7 +44,8 @@
     "services": [],
     "providers": [
       "plugin.system.permission_service.page",
-      "plugin.system.permission_service.ui"
+      "plugin.system.permission_service.ui",
+      "plugin.system.permission_service.pairing_overlay"
     ],
     "extensions": [
       {

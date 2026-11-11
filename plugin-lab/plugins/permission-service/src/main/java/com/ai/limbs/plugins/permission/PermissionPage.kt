@@ -9,7 +9,6 @@ import android.view.View
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Security
@@ -20,8 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ViewCompositionStrategy
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
 import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
@@ -33,12 +30,13 @@ import kotlinx.coroutines.launch
 
 internal class PermissionPage(
     private val host: InProcessPluginUiHost,
-    private val controller: PermissionPageController
+    private val controller: PermissionPageController,
+    private val pairing: PermissionPairingOverlay
 ) : InProcessPageProvider {
     override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View =
         ComposeView(host.createPluginContext(context)).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
-            setContent { MaterialTheme(colorScheme = darkColorScheme()) { Content(host, controller) } }
+            setContent { MaterialTheme(colorScheme = darkColorScheme()) { Content(host, controller, pairing) } }
         }
 }
 
@@ -75,12 +73,9 @@ private fun readBuiltInAccessibilityStatus(context: Context): BuiltInAccessibili
 }
 
 @Composable
-private fun Content(host: InProcessPluginUiHost, controller: PermissionPageController) {
+private fun Content(host: InProcessPluginUiHost, controller: PermissionPageController, pairing: PermissionPairingOverlay) {
     val state by controller.state.collectAsState()
     val context = LocalContext.current
-    var pairPort by remember { mutableStateOf("") }
-    var pairCode by remember { mutableStateOf("") }
-    var connectPort by remember { mutableStateOf("") }
     var stopConfirm by remember { mutableStateOf(false) }
     var authorizationOpen by remember { mutableStateOf(false) }
     var accessibilityStatus by remember { mutableStateOf(BuiltInAccessibilityStatus()) }
@@ -143,35 +138,11 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("无线调试", style = MaterialTheme.typography.titleMedium)
-                Text("在开发者选项中打开无线调试。首次使用请选“使用配对码配对设备”，填写该窗口中的端口和六位配对码。建议分屏保持配对窗口打开。")
+                Text("打开开发者选项时会同时打开配对浮窗，可对照系统窗口填写，无需分屏。浮窗顶部可拖动，也可以收起或关闭。")
                 OutlinedButton(enabled = !state.busy, onClick = {
-                    try {
-                        context.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    } catch (error: Exception) {
-                        host.logger.w("PermissionService", "Open developer settings failed: " + error.message)
-                        Toast.makeText(context, "请手动打开系统设置中的开发者选项", Toast.LENGTH_LONG).show()
-                    }
+                    perform { pairing.openDeveloperOptions(context) }
                 }) { Text("打开开发者选项") }
-                OutlinedTextField(value = pairPort, onValueChange = { pairPort = it.filter(Char::isDigit).take(5) },
-                    label = { Text("配对端口") }, singleLine = true, enabled = !state.busy,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = pairCode, onValueChange = { pairCode = it.filter(Char::isDigit).take(6) },
-                    label = { Text("六位配对码") }, singleLine = true, enabled = !state.busy,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), modifier = Modifier.fillMaxWidth())
-                Button(enabled = !state.busy && pairCode.length == 6 && pairPort.isNotBlank(), onClick = {
-                    val code = pairCode
-                    pairCode = ""
-                    perform { controller.pair(pairPort.toInt(), code) }
-                }) { Text("配对") }
-                HorizontalDivider()
-                Text("配对成功后，使用无线调试主页上的连接端口启动。连接端口与配对端口不同，重启后可能变化。")
-                OutlinedTextField(value = connectPort, onValueChange = { connectPort = it.filter(Char::isDigit).take(5) },
-                    label = { Text("连接端口") }, singleLine = true, enabled = !state.busy,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-                Button(enabled = !state.busy && !state.running && connectPort.isNotBlank(), onClick = {
-                    perform { controller.startAdb(connectPort.toInt()) }
-                }) { Text("启动权限服务") }
+                WirelessDebuggingForm(host, controller, pairing.form)
             }
         }
         Card(Modifier.fillMaxWidth()) {
@@ -242,7 +213,7 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
             }
         }
         Text(
-            "v0.2.2 · 权限服务基于 Shizuku 开源技术（Apache-2.0）；无障碍功能由 AI Limbs 基座提供。",
+            "v0.2.3 · 权限服务基于 Shizuku 开源技术（Apache-2.0）；无障碍功能由 AI Limbs 基座提供。",
             style = MaterialTheme.typography.bodySmall
         )
     }
